@@ -42,7 +42,11 @@ exclude_users=root,telegraf,radvd,strongswan,tftp,conservr,frr,ocserv,pdns,_chro
 {% if tacacs.server is vyos_defined %}
 {%     for server, server_config in tacacs.server.items() %}
 secret={{ server_config.key }}
+{%     if server | is_ipv4 %}
+server={{ server }}:{{ server_config.port }}
+{%     else %}
 server=[{{ server }}]:{{ server_config.port }}
+{%     endif %}
 
 {%     endfor %}
 {% endif %}

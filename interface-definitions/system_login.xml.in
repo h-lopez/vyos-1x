@@ -249,7 +249,7 @@
                   </leafNode>
                 </children>
               </tagNode>
-              #include <include/source-address-ipv4-ipv6.xml.i>
+              #include <include/source-address-ipv4.xml.i>
               <leafNode name="security-mode">
                 <properties>
                   <help>Security mode for TACACS+ authentication</help>
