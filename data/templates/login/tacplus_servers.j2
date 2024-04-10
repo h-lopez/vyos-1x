@@ -22,11 +22,11 @@ timeout={{ tacacs.timeout }}
 {% if tacacs.server is vyos_defined %}
 {%     for server, server_config in tacacs.server.items() %}
 secret={{ server_config.key }}
-{%     if server | is_ipv4 %}
+{%         if server | is_ipv4 %}
 server={{ server }}:{{ server_config.port }}
-{%     else %}
+{%         else %}
 server=[{{ server }}]:{{ server_config.port }}
-{%     endif %}
+{%         endif %}
 {%     endfor %}
 {% endif %}
 
