@@ -232,8 +232,12 @@
                     <format>ipv4</format>
                     <description>TACACS+ server IPv4 address</description>
                   </valueHelp>
+                  <valueHelp>
+                    <format>ipv6</format>
+                    <description>TACACS+ server IPv6 address</description>
+                  </valueHelp>
                   <constraint>
-                    <validator name="ipv4-address"/>
+                    <validator name="ip-address"/>
                   </constraint>
                 </properties>
                 <children>
@@ -245,7 +249,7 @@
                   </leafNode>
                 </children>
               </tagNode>
-              #include <include/source-address-ipv4.xml.i>
+              #include <include/source-address-ipv4-ipv6.xml.i>
               <leafNode name="security-mode">
                 <properties>
                   <help>Security mode for TACACS+ authentication</help>

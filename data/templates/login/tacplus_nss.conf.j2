@@ -42,7 +42,7 @@ exclude_users=root,telegraf,radvd,strongswan,tftp,conservr,frr,ocserv,pdns,_chro
 {% if tacacs.server is vyos_defined %}
 {%     for server, server_config in tacacs.server.items() %}
 secret={{ server_config.key }}
-server={{ server }}:{{ server_config.port }}
+server=[{{ server }}]:{{ server_config.port }}
 
 {%     endfor %}
 {% endif %}
@@ -71,4 +71,3 @@ source_ip={{ tacacs.source_address }}
 # as in tacplus_servers, since tacplus_servers should not be readable
 # by users other than root.
 timeout={{ tacacs.timeout }}
-
