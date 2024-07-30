@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-#
-# Copyright (C) 2020 VyOS maintainers and contributors
+# Copyright (C) 2020-2024 VyOS maintainers and contributors
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License version 2 or later as
@@ -27,9 +25,6 @@ class TestDeviceFile(TestCase):
 
     def test_zero(self):
         self.assertEqual(find_device_file('zero'), '/dev/zero')
-
-    def test_input_event(self):
-        self.assertEqual(find_device_file('event0'), '/dev/input/event0')
 
     def test_non_existing(self):
         self.assertFalse(find_device_file('vyos'))

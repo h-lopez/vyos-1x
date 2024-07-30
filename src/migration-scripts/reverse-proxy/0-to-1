@@ -1,0 +1,31 @@
+# Copyright 2024 VyOS maintainers and contributors <maintainers@vyos.io>
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this library.  If not, see <http://www.gnu.org/licenses/>.
+
+# T6409: Remove unused 'backend bk-example parameters' node
+
+from vyos.configtree import ConfigTree
+
+base = ['load-balancing', 'reverse-proxy', 'backend']
+
+def migrate(config: ConfigTree) -> None:
+    if not config.exists(base):
+        # Nothing to do
+        return
+
+    # we need to run this for every configured network
+    for backend in config.list_nodes(base):
+        param_node = base + [backend, 'parameters']
+        if config.exists(param_node):
+            config.delete(param_node)

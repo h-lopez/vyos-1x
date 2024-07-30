@@ -31,6 +31,7 @@ from vyos.utils.dict import dict_search
 ArgDirection = typing.Literal['source', 'destination']
 ArgFamily = typing.Literal['inet', 'inet6']
 
+
 def _get_xml_translation(direction, family, address=None):
     """
     Get conntrack XML output --src-nat|--dst-nat
@@ -99,6 +100,36 @@ def _get_raw_translation(direction, family, address=None):
 
 
 def _get_formatted_output_rules(data, direction, family):
+
+
+    def _get_ports_for_output(rules):
+        """
+        Return: string of configured ports
+        """
+        ports = []
+        if 'set' in rules:
+            for index, port in enumerate(rules['set']):
+                if 'range' in str(rules['set'][index]):
+                    output = rules['set'][index]['range']
+                    output = '-'.join(map(str, output))
+                else:
+                    output = str(port)
+                ports.append(output)
+        # When NAT rule contains port range or single port
+        # JSON will not contain keyword 'set'
+        elif 'range' in rules:
+            output = rules['range']
+            output = '-'.join(map(str, output))
+            ports.append(output)
+        else:
+            output = rules['right']
+            ports.append(str(output))
+        result = ','.join(ports)
+        # Handle case where ports in NAT rule are negated
+        if rules['op'] == '!=':
+            result = '!' + result
+        return(result)
+
     # Add default values before loop
     sport, dport, proto = 'any', 'any', 'any'
     saddr = '::/0' if family == 'inet6' else '0.0.0.0/0'
@@ -115,7 +146,10 @@ def _get_formatted_output_rules(data, direction, family):
                 if jmespath.search('rule.expr[*].match.left.meta', rule) else 'any'
         for index, match in enumerate(jmespath.search('rule.expr[*].match', rule)):
             if 'payload' in match['left']:
-                if isinstance(match['right'], dict) and ('prefix' in match['right'] or 'set' in match['right']):
+                # Handle NAT rule containing comma-seperated list of ports
+                if (isinstance(match['right'], dict) and
+                    ('prefix' in match['right'] or 'set' in match['right'] or
+                     'range' in match['right'])):
                     # Merge dict src/dst l3_l4 parameters
                     my_dict = {**match['left']['payload'], **match['right']}
                     my_dict['op'] = match['op']
@@ -126,21 +160,10 @@ def _get_formatted_output_rules(data, direction, family):
                     elif my_dict['field'] == 'daddr':
                         daddr = f'{op}{my_dict["prefix"]["addr"]}/{my_dict["prefix"]["len"]}'
                     elif my_dict['field'] == 'sport':
-                        # Port range or single port
-                        if jmespath.search('set[*].range', my_dict):
-                            sport = my_dict['set'][0]['range']
-                            sport = '-'.join(map(str, sport))
-                        else:
-                            sport = my_dict.get('set')
-                            sport = ','.join(map(str, sport))
+                        sport = _get_ports_for_output(my_dict)
                     elif my_dict['field'] == 'dport':
-                        # Port range or single port
-                        if jmespath.search('set[*].range', my_dict):
-                            dport = my_dict["set"][0]["range"]
-                            dport = '-'.join(map(str, dport))
-                        else:
-                            dport = my_dict.get('set')
-                            dport = ','.join(map(str, dport))
+                        dport = _get_ports_for_output(my_dict)
+                # Handle NAT rule containing a single port
                 else:
                     field = jmespath.search('left.payload.field', match)
                     if field == 'saddr':
@@ -148,9 +171,9 @@ def _get_formatted_output_rules(data, direction, family):
                     elif field == 'daddr':
                         daddr = match.get('right')
                     elif field == 'sport':
-                        sport = match.get('right')
+                        sport = _get_ports_for_output(match)
                     elif field == 'dport':
-                        dport = match.get('right')
+                        dport = _get_ports_for_output(match)
             else:
                 saddr = '::/0' if family == 'inet6' else '0.0.0.0/0'
                 daddr = '::/0' if family == 'inet6' else '0.0.0.0/0'
@@ -263,7 +286,7 @@ def _get_formatted_translation(dict_data, nat_direction, family, verbose):
                     proto = meta['layer4']['protoname']
             if direction == 'independent':
                 conn_id = meta['id']
-                timeout = meta['timeout']
+                timeout = meta.get('timeout', 'n/a')
                 orig_src = f'{orig_src}:{orig_sport}' if orig_sport else orig_src
                 orig_dst = f'{orig_dst}:{orig_dport}' if orig_dport else orig_dst
                 reply_src = f'{reply_src}:{reply_sport}' if reply_sport else reply_src

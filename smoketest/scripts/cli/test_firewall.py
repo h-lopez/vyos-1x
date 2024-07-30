@@ -23,10 +23,12 @@ from base_vyostest_shim import VyOSUnitTestSHIM
 
 from vyos.configsession import ConfigSessionError
 from vyos.utils.process import run
+from vyos.utils.file import read_file
 
 sysfs_config = {
     'all_ping': {'sysfs': '/proc/sys/net/ipv4/icmp_echo_ignore_all', 'default': '0', 'test_value': 'disable'},
     'broadcast_ping': {'sysfs': '/proc/sys/net/ipv4/icmp_echo_ignore_broadcasts', 'default': '1', 'test_value': 'enable'},
+    'directed_broadcast': {'sysfs': '/proc/sys/net/ipv4/conf/all/bc_forwarding', 'default': '1', 'test_value': 'disable'},
     'ip_src_route': {'sysfs': '/proc/sys/net/ipv4/conf/*/accept_source_route', 'default': '0', 'test_value': 'enable'},
     'ipv6_receive_redirects': {'sysfs': '/proc/sys/net/ipv6/conf/*/accept_redirects', 'default': '0', 'test_value': 'enable'},
     'ipv6_src_route': {'sysfs': '/proc/sys/net/ipv6/conf/*/accept_source_route', 'default': '-1', 'test_value': 'enable'},
@@ -36,6 +38,10 @@ sysfs_config = {
     'syn_cookies': {'sysfs': '/proc/sys/net/ipv4/tcp_syncookies', 'default': '1', 'test_value': 'disable'},
     'twa_hazards_protection': {'sysfs': '/proc/sys/net/ipv4/tcp_rfc1337', 'default': '0', 'test_value': 'enable'}
 }
+
+def get_sysctl(parameter):
+    tmp = parameter.replace(r'.', r'/')
+    return read_file(f'/proc/sys/{tmp}')
 
 class TestFirewall(VyOSUnitTestSHIM.TestCase):
     @classmethod
@@ -235,6 +241,14 @@ class TestFirewall(VyOSUnitTestSHIM.TestCase):
         self.cli_set(['firewall', 'ipv4', 'output', 'filter', 'rule', '6', 'protocol', 'icmp'])
         self.cli_set(['firewall', 'ipv4', 'output', 'filter', 'rule', '6', 'connection-mark', conn_mark])
 
+        self.cli_set(['firewall', 'ipv4', 'output', 'raw', 'default-action', 'drop'])
+        self.cli_set(['firewall', 'ipv4', 'output', 'raw', 'rule', '1', 'action', 'accept'])
+        self.cli_set(['firewall', 'ipv4', 'output', 'raw', 'rule', '1', 'protocol', 'udp'])
+
+        self.cli_set(['firewall', 'ipv4', 'prerouting', 'raw', 'rule', '1', 'action', 'notrack'])
+        self.cli_set(['firewall', 'ipv4', 'prerouting', 'raw', 'rule', '1', 'protocol', 'tcp'])
+        self.cli_set(['firewall', 'ipv4', 'prerouting', 'raw', 'rule', '1', 'destination', 'port', '23'])
+
         self.cli_commit()
 
         mark_hex = "{0:#010x}".format(int(conn_mark))
@@ -255,6 +269,14 @@ class TestFirewall(VyOSUnitTestSHIM.TestCase):
             ['meta l4proto gre', f'oifname != "{interface}"', 'drop'],
             ['meta l4proto icmp', f'ct mark {mark_hex}', 'return'],
             ['log prefix "[ipv4-OUT-filter-default-D]"','OUT-filter default-action drop', 'drop'],
+            ['chain VYOS_OUTPUT_raw'],
+            ['type filter hook output priority raw; policy accept;'],
+            ['udp', 'accept'],
+            ['OUT-raw default-action drop', 'drop'],
+            ['chain VYOS_PREROUTING_raw'],
+            ['type filter hook prerouting priority raw; policy accept;'],
+            ['tcp dport 23', 'notrack'],
+            ['PRE-raw default-action accept', 'accept'],
             ['chain NAME_smoketest'],
             ['saddr 172.16.20.10', 'daddr 172.16.10.10', 'log prefix "[ipv4-NAM-smoketest-1-A]" log level debug', 'ip ttl 15', 'accept'],
             ['tcp flags syn / syn,ack', 'tcp dport 8888', 'log prefix "[ipv4-NAM-smoketest-2-R]" log level err', 'ip ttl > 102', 'reject'],
@@ -445,16 +467,24 @@ class TestFirewall(VyOSUnitTestSHIM.TestCase):
         self.cli_set(['firewall', 'ipv6', 'forward', 'filter', 'rule', '2', 'destination', 'port', '8888'])
         self.cli_set(['firewall', 'ipv6', 'forward', 'filter', 'rule', '2', 'inbound-interface', 'name', interface])
 
+        self.cli_set(['firewall', 'ipv6', 'input', 'filter', 'rule', '3', 'action', 'accept'])
+        self.cli_set(['firewall', 'ipv6', 'input', 'filter', 'rule', '3', 'protocol', 'udp'])
+        self.cli_set(['firewall', 'ipv6', 'input', 'filter', 'rule', '3', 'source', 'address', '2002::1:2'])
+        self.cli_set(['firewall', 'ipv6', 'input', 'filter', 'rule', '3', 'inbound-interface', 'name', interface])
+
         self.cli_set(['firewall', 'ipv6', 'output', 'filter', 'default-action', 'drop'])
         self.cli_set(['firewall', 'ipv6', 'output', 'filter', 'default-log'])
         self.cli_set(['firewall', 'ipv6', 'output', 'filter', 'rule', '3', 'action', 'return'])
         self.cli_set(['firewall', 'ipv6', 'output', 'filter', 'rule', '3', 'protocol', 'gre'])
         self.cli_set(['firewall', 'ipv6', 'output', 'filter', 'rule', '3', 'outbound-interface', 'name', interface])
 
-        self.cli_set(['firewall', 'ipv6', 'input', 'filter', 'rule', '3', 'action', 'accept'])
-        self.cli_set(['firewall', 'ipv6', 'input', 'filter', 'rule', '3', 'protocol', 'udp'])
-        self.cli_set(['firewall', 'ipv6', 'input', 'filter', 'rule', '3', 'source', 'address', '2002::1:2'])
-        self.cli_set(['firewall', 'ipv6', 'input', 'filter', 'rule', '3', 'inbound-interface', 'name', interface])
+        self.cli_set(['firewall', 'ipv6', 'output', 'raw', 'default-action', 'drop'])
+        self.cli_set(['firewall', 'ipv6', 'output', 'raw', 'rule', '1', 'action', 'notrack'])
+        self.cli_set(['firewall', 'ipv6', 'output', 'raw', 'rule', '1', 'protocol', 'udp'])
+
+        self.cli_set(['firewall', 'ipv6', 'prerouting', 'raw', 'rule', '1', 'action', 'drop'])
+        self.cli_set(['firewall', 'ipv6', 'prerouting', 'raw', 'rule', '1', 'protocol', 'tcp'])
+        self.cli_set(['firewall', 'ipv6', 'prerouting', 'raw', 'rule', '1', 'destination', 'port', '23'])
 
         self.cli_commit()
 
@@ -471,6 +501,14 @@ class TestFirewall(VyOSUnitTestSHIM.TestCase):
             ['type filter hook output priority filter; policy accept;'],
             ['meta l4proto gre', f'oifname "{interface}"', 'return'],
             ['log prefix "[ipv6-OUT-filter-default-D]"','OUT-filter default-action drop', 'drop'],
+            ['chain VYOS_IPV6_OUTPUT_raw'],
+            ['type filter hook output priority raw; policy accept;'],
+            ['udp', 'notrack'],
+            ['OUT-raw default-action drop', 'drop'],
+            ['chain VYOS_IPV6_PREROUTING_raw'],
+            ['type filter hook prerouting priority raw; policy accept;'],
+            ['tcp dport 23', 'drop'],
+            ['PRE-raw default-action accept', 'accept'],
             [f'chain NAME6_{name}'],
             ['saddr 2002::1', 'daddr 2002::1:1', 'log prefix "[ipv6-NAM-v6-smoketest-1-A]" log level crit', 'accept'],
             [f'"{name} default-action drop"', f'log prefix "[ipv6-{name}-default-D]"', 'drop'],
@@ -737,6 +775,89 @@ class TestFirewall(VyOSUnitTestSHIM.TestCase):
                 with open(path, 'r') as f:
                     self.assertNotEqual(f.read().strip(), conf['default'], msg=path)
 
+    def test_timeout_sysctl(self):
+        timeout_config = {
+            'net.netfilter.nf_conntrack_icmp_timeout' :{
+                'cli'           : ['global-options', 'timeout', 'icmp'],
+                'test_value'    : '180',
+                'default_value' : '30',
+            },
+            'net.netfilter.nf_conntrack_generic_timeout' :{
+                'cli'           : ['global-options', 'timeout', 'other'],
+                'test_value'    : '1200',
+                'default_value' : '600',
+            },
+            'net.netfilter.nf_conntrack_tcp_timeout_close_wait' :{
+                'cli'           : ['global-options', 'timeout', 'tcp', 'close-wait'],
+                'test_value'    : '30',
+                'default_value' : '60',
+            },
+            'net.netfilter.nf_conntrack_tcp_timeout_close' :{
+                'cli'           : ['global-options', 'timeout', 'tcp', 'close'],
+                'test_value'    : '20',
+                'default_value' : '10',
+            },
+            'net.netfilter.nf_conntrack_tcp_timeout_established' :{
+                'cli'           : ['global-options', 'timeout', 'tcp', 'established'],
+                'test_value'    : '1000',
+                'default_value' : '432000',
+            },
+            'net.netfilter.nf_conntrack_tcp_timeout_fin_wait' :{
+                'cli'           : ['global-options', 'timeout', 'tcp', 'fin-wait'],
+                'test_value'    : '240',
+                'default_value' : '120',
+            },
+            'net.netfilter.nf_conntrack_tcp_timeout_last_ack' :{
+                'cli'           : ['global-options', 'timeout', 'tcp', 'last-ack'],
+                'test_value'    : '300',
+                'default_value' : '30',
+            },
+            'net.netfilter.nf_conntrack_tcp_timeout_syn_recv' :{
+                'cli'           : ['global-options', 'timeout', 'tcp', 'syn-recv'],
+                'test_value'    : '100',
+                'default_value' : '60',
+            },
+            'net.netfilter.nf_conntrack_tcp_timeout_syn_sent' :{
+                'cli'           : ['global-options', 'timeout', 'tcp', 'syn-sent'],
+                'test_value'    : '300',
+                'default_value' : '120',
+            },
+            'net.netfilter.nf_conntrack_tcp_timeout_time_wait' :{
+                'cli'           : ['global-options', 'timeout', 'tcp', 'time-wait'],
+                'test_value'    : '303',
+                'default_value' : '120',
+            },
+            'net.netfilter.nf_conntrack_udp_timeout' :{
+                'cli'           : ['global-options', 'timeout', 'udp', 'other'],
+                'test_value'    : '90',
+                'default_value' : '30',
+            },
+            'net.netfilter.nf_conntrack_udp_timeout_stream' :{
+                'cli'           : ['global-options', 'timeout', 'udp', 'stream'],
+                'test_value'    : '200',
+                'default_value' : '180',
+            },
+        }
+
+        for parameter, parameter_config in timeout_config.items():
+            self.cli_set(['firewall'] + parameter_config['cli'] + [parameter_config['test_value']])
+
+        # commit changes
+        self.cli_commit()
+
+        # validate configuration
+        for parameter, parameter_config in timeout_config.items():
+            tmp = parameter_config['test_value']
+            self.assertEqual(get_sysctl(f'{parameter}'), tmp)
+
+        # delete all configuration options and revert back to defaults
+        self.cli_delete(['firewall', 'global-options', 'timeout'])
+        self.cli_commit()
+
+        # validate configuration
+        for parameter, parameter_config in timeout_config.items():
+            self.assertEqual(get_sysctl(f'{parameter}'), parameter_config['default_value'])
+
 ### Zone
     def test_zone_basic(self):
         self.cli_set(['firewall', 'ipv4', 'name', 'smoketest', 'default-action', 'drop'])
@@ -873,6 +994,82 @@ class TestFirewall(VyOSUnitTestSHIM.TestCase):
         # Check conntrack
         self.verify_nftables_chain([['accept']], 'ip vyos_conntrack', 'FW_CONNTRACK')
         self.verify_nftables_chain([['accept']], 'ip6 vyos_conntrack', 'FW_CONNTRACK')
+
+    def test_ipsec_metadata_match(self):
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-in4', 'rule', '1', 'action', 'accept'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-in4', 'rule', '1', 'ipsec', 'match-ipsec-in'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-in4', 'rule', '2', 'action', 'drop'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-in4', 'rule', '2', 'ipsec', 'match-none-in'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-out4', 'rule', '1', 'action', 'continue'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-out4', 'rule', '1', 'ipsec', 'match-ipsec-out'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-out4', 'rule', '2', 'action', 'reject'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-out4', 'rule', '2', 'ipsec', 'match-none-out'])
+        self.cli_set(['firewall', 'ipv6', 'name', 'smoketest-ipsec-in6', 'rule', '1', 'action', 'accept'])
+        self.cli_set(['firewall', 'ipv6', 'name', 'smoketest-ipsec-in6', 'rule', '1', 'ipsec', 'match-ipsec-in'])
+        self.cli_set(['firewall', 'ipv6', 'name', 'smoketest-ipsec-in6', 'rule', '2', 'action', 'drop'])
+        self.cli_set(['firewall', 'ipv6', 'name', 'smoketest-ipsec-in6', 'rule', '2', 'ipsec', 'match-none-in'])
+        self.cli_set(['firewall', 'ipv6', 'name', 'smoketest-ipsec-out6', 'rule', '1', 'action', 'continue'])
+        self.cli_set(['firewall', 'ipv6', 'name', 'smoketest-ipsec-out6', 'rule', '1', 'ipsec', 'match-ipsec-out'])
+        self.cli_set(['firewall', 'ipv6', 'name', 'smoketest-ipsec-out6', 'rule', '2', 'action', 'reject'])
+        self.cli_set(['firewall', 'ipv6', 'name', 'smoketest-ipsec-out6', 'rule', '2', 'ipsec', 'match-none-out'])
+
+        self.cli_commit()
+
+        nftables_search = [
+            ['meta ipsec exists', 'accept comment'],
+            ['meta ipsec missing', 'drop comment'],
+            ['rt ipsec exists', 'continue comment'],
+            ['rt ipsec missing', 'reject comment'],
+        ]
+
+        self.verify_nftables(nftables_search, 'ip vyos_filter')
+        self.verify_nftables(nftables_search, 'ip6 vyos_filter')
+
+        self.cli_set(['firewall', 'ipv4', 'input', 'filter', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'input', 'filter', 'rule', '1', 'jump-target', 'smoketest-ipsec-in4'])
+        self.cli_set(['firewall', 'ipv4', 'forward', 'filter', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'forward', 'filter', 'rule', '1', 'jump-target', 'smoketest-ipsec-in4'])
+        self.cli_set(['firewall', 'ipv4', 'prerouting', 'raw', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'prerouting', 'raw', 'rule', '1', 'jump-target', 'smoketest-ipsec-in4'])
+        
+        self.cli_set(['firewall', 'ipv4', 'output', 'filter', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'output', 'filter', 'rule', '1', 'jump-target', 'smoketest-ipsec-out4'])
+        self.cli_set(['firewall', 'ipv4', 'forward', 'filter', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'forward', 'filter', 'rule', '1', 'jump-target', 'smoketest-ipsec-out4'])
+
+        # All valid directional usage of ipsec matches
+        self.cli_commit()
+
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-in-indirect', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-ipsec-in-indirect', 'rule', '1', 'jump-target', 'smoketest-ipsec-in4'])
+
+        self.cli_set(['firewall', 'ipv4', 'output', 'filter', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'output', 'filter', 'rule', '1', 'jump-target', 'smoketest-ipsec-in-indirect'])
+
+        # nft does not support ANY usage of 'meta ipsec' under an output hook, it will fail to load cfg
+        with self.assertRaises(ConfigSessionError):
+            self.cli_commit()
+
+    def test_cyclic_jump_validation(self):
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-cycle-1', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-cycle-1', 'rule', '1', 'jump-target', 'smoketest-cycle-2'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-cycle-2', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-cycle-2', 'rule', '1', 'jump-target', 'smoketest-cycle-3'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-cycle-3', 'rule', '1', 'action', 'accept'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-cycle-3', 'rule', '1', 'log'])
+        self.cli_set(['firewall', 'ipv4', 'input', 'filter', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'input', 'filter', 'rule', '1', 'jump-target', 'smoketest-cycle-1'])
+
+        # Multi-level jumps are unwise but allowed
+        self.cli_commit()
+
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-cycle-3', 'rule', '1', 'action', 'jump'])
+        self.cli_set(['firewall', 'ipv4', 'name', 'smoketest-cycle-3', 'rule', '1', 'jump-target', 'smoketest-cycle-1'])
+
+        # nft will fail to load cyclic jumps in any form, whether the rule is reachable or not. 
+        # It should be caught by conf validation. 
+        with self.assertRaises(ConfigSessionError):
+            self.cli_commit()
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -48,7 +48,7 @@ def connect(interface):
         if os.path.isdir(f'/sys/class/net/{interface}'):
             print(f'Interface {interface}: already connected!')
         elif check_ppp_running(interface):
-            print(f'Interface {interface}: connection is beeing established!')
+            print(f'Interface {interface}: connection is being established!')
         else:
             print(f'Interface {interface}: connecting...')
             call(f'systemctl restart ppp@{interface}.service')
@@ -58,7 +58,7 @@ def connect(interface):
         else:
             call(f'VYOS_TAGNODE_VALUE={interface} /usr/libexec/vyos/conf_mode/interfaces_wwan.py')
     else:
-        print(f'Unknown interface {interface}, can not connect. Aborting!')
+        print(f'Unknown interface {interface}, cannot connect. Aborting!')
 
     # Reaply QoS configuration
     config = ConfigTreeQuery()
@@ -90,22 +90,26 @@ def disconnect(interface):
             modem = interface.lstrip('wwan')
             call(f'mmcli --modem {modem} --simple-disconnect', stdout=DEVNULL)
     else:
-        print(f'Unknown interface {interface}, can not disconnect. Aborting!')
+        print(f'Unknown interface {interface}, cannot disconnect. Aborting!')
 
 def main():
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--connect", help="Bring up a connection-oriented network interface", action="store")
-    group.add_argument("--disconnect", help="Take down connection-oriented network interface", action="store")
+    group.add_argument("--connect", help="Bring up a connection-oriented network interface", action="store_true")
+    group.add_argument("--disconnect", help="Take down connection-oriented network interface", action="store_true")
+    parser.add_argument("--interface", help="Interface name", action="store", required=True)
     args = parser.parse_args()
 
-    if args.connect:
-        if commit_in_progress():
-            print('Cannot connect while a commit is in progress')
-            exit(1)
-        connect(args.connect)
-    elif args.disconnect:
-        disconnect(args.disconnect)
+    if args.connect or args.disconnect:
+        if args.disconnect:
+            disconnect(args.interface)
+
+        if args.connect:
+            if commit_in_progress():
+                print('Cannot connect while a commit is in progress')
+                exit(1)
+            connect(args.interface)
+
     else:
         parser.print_help()
 

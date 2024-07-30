@@ -24,6 +24,8 @@ from vyos.config import config_dict_merge
 from vyos.configdep import set_dependents
 from vyos.configdep import call_dependents
 from vyos.configdict import node_changed
+from vyos.configdiff import Diff
+from vyos.configdiff import get_config_diff
 from vyos.defaults import directories
 from vyos.pki import is_ca_certificate
 from vyos.pki import load_certificate
@@ -65,6 +67,10 @@ sync_search = [
         'path': ['interfaces', 'sstpc'],
     },
     {
+        'keys': ['certificate', 'ca_certificate'],
+        'path': ['load_balancing', 'reverse_proxy'],
+    },
+    {
         'keys': ['key'],
         'path': ['protocols', 'rpki', 'cache'],
     },
@@ -79,6 +85,10 @@ sync_search = [
     {
         'keys': ['certificate', 'ca_certificate'],
         'path': ['vpn', 'sstp'],
+    },
+    {
+        'keys': ['certificate', 'ca_certificate'],
+        'path': ['service', 'stunnel'],
     }
 ]
 
@@ -136,32 +146,32 @@ def get_config(config=None):
     if len(argv) > 1 and argv[1] == 'certbot_renew':
         pki['certbot_renew'] = {}
 
-    tmp = node_changed(conf, base + ['ca'], recursive=True)
+    tmp = node_changed(conf, base + ['ca'], recursive=True, expand_nodes=Diff.DELETE | Diff.ADD)
     if tmp:
         if 'changed' not in pki: pki.update({'changed':{}})
         pki['changed'].update({'ca' : tmp})
 
-    tmp = node_changed(conf, base + ['certificate'], recursive=True)
+    tmp = node_changed(conf, base + ['certificate'], recursive=True, expand_nodes=Diff.DELETE | Diff.ADD)
     if tmp:
         if 'changed' not in pki: pki.update({'changed':{}})
         pki['changed'].update({'certificate' : tmp})
 
-    tmp = node_changed(conf, base + ['dh'], recursive=True)
+    tmp = node_changed(conf, base + ['dh'], recursive=True, expand_nodes=Diff.DELETE | Diff.ADD)
     if tmp:
         if 'changed' not in pki: pki.update({'changed':{}})
         pki['changed'].update({'dh' : tmp})
 
-    tmp = node_changed(conf, base + ['key-pair'], recursive=True)
+    tmp = node_changed(conf, base + ['key-pair'], recursive=True, expand_nodes=Diff.DELETE | Diff.ADD)
     if tmp:
         if 'changed' not in pki: pki.update({'changed':{}})
         pki['changed'].update({'key_pair' : tmp})
 
-    tmp = node_changed(conf, base + ['openssh'], recursive=True)
+    tmp = node_changed(conf, base + ['openssh'], recursive=True, expand_nodes=Diff.DELETE | Diff.ADD)
     if tmp:
         if 'changed' not in pki: pki.update({'changed':{}})
         pki['changed'].update({'openssh' : tmp})
 
-    tmp = node_changed(conf, base + ['openvpn', 'shared-secret'], recursive=True)
+    tmp = node_changed(conf, base + ['openvpn', 'shared-secret'], recursive=True, expand_nodes=Diff.DELETE | Diff.ADD)
     if tmp:
         if 'changed' not in pki: pki.update({'changed':{}})
         pki['changed'].update({'openvpn' : tmp})
@@ -198,6 +208,7 @@ def get_config(config=None):
     pki['system'] = conf.get_config_dict([], key_mangling=('-', '_'),
                                          get_first_key=True,
                                          no_tag_node_value_mangle=True)
+    D = get_config_diff(conf)
 
     for search in sync_search:
         for key in search['keys']:
@@ -217,15 +228,22 @@ def get_config(config=None):
                     if not search_dict:
                         continue
                     for found_name, found_path in dict_search_recursive(search_dict, key):
-                        if found_name == item_name:
-                            path = search['path']
-                            path_str = ' '.join(path + found_path)
-                            print(f'PKI: Updating config: {path_str} {found_name}')
+                        if isinstance(found_name, list) and item_name not in found_name:
+                            continue
 
-                            if path[0] == 'interfaces':
-                                ifname = found_path[0]
+                        if isinstance(found_name, str) and found_name != item_name:
+                            continue
+
+                        path = search['path']
+                        path_str = ' '.join(path + found_path)
+                        #print(f'PKI: Updating config: {path_str} {item_name}')
+
+                        if path[0] == 'interfaces':
+                            ifname = found_path[0]
+                            if not D.node_changed_presence(path + [ifname]):
                                 set_dependents(path[1], conf, ifname)
-                            else:
+                        else:
+                            if not D.node_changed_presence(path):
                                 set_dependents(path[1], conf)
 
     return pki

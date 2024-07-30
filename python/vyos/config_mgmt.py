@@ -81,9 +81,11 @@ def save_config(target, json_out=None):
     if rc != 0:
         logger.critical(f'save config failed: {out}')
 
-def unsaved_commits() -> bool:
+def unsaved_commits(allow_missing_config=False) -> bool:
     if get_full_version_data()['boot_via'] == 'livecd':
         return False
+    if allow_missing_config and not os.path.exists(config_file):
+        return True
     tmp_save = '/tmp/config.running'
     save_config(tmp_save)
     ret = not cmp(tmp_save, config_file, shallow=False)
@@ -283,6 +285,8 @@ Proceed ?'''
         rollback_ct = self._get_config_tree_revision(rev)
         try:
             load(rollback_ct, switch='explicit')
+            print('Rollback diff has been applied.')
+            print('Use "compare" to review the changes or "commit" to apply them.')
         except LoadConfigError as e:
             raise ConfigMgmtError(e) from e
 

@@ -5,6 +5,7 @@
       <node name="reverse-proxy" owner="${vyos_conf_scripts_dir}/load-balancing_reverse-proxy.py">
         <properties>
           <help>Configure reverse-proxy</help>
+          <priority>900</priority>
         </properties>
         <children>
           <tagNode name="service">
@@ -35,9 +36,12 @@
               </leafNode>
               #include <include/generic-description.xml.i>
               #include <include/listen-address.xml.i>
+              #include <include/haproxy/logging.xml.i>
               #include <include/haproxy/mode.xml.i>
               #include <include/port-number.xml.i>
               #include <include/haproxy/rule-frontend.xml.i>
+              #include <include/haproxy/tcp-request.xml.i>
+              #include <include/haproxy/http-response-headers.xml.i>
               <leafNode name="redirect-http-to-https">
                 <properties>
                   <help>Redirect HTTP to HTTPS</help>
@@ -88,20 +92,99 @@
                 <defaultValue>round-robin</defaultValue>
               </leafNode>
               #include <include/generic-description.xml.i>
+              #include <include/haproxy/logging.xml.i>
               #include <include/haproxy/mode.xml.i>
-              <node name="parameters">
+              #include <include/haproxy/http-response-headers.xml.i>
+              <node name="http-check">
                 <properties>
-                  <help>Backend parameters</help>
+                  <help>HTTP check configuration</help>
                 </properties>
                 <children>
-                  <leafNode name="http-check">
+                  <leafNode name="method">
                     <properties>
-                      <help>HTTP health check</help>
-                      <valueless/>
+                      <help>HTTP method used for health check</help>
+                      <completionHelp>
+                        <list>options head get post put</list>
+                      </completionHelp>
+                      <valueHelp>
+                        <format>options|head|get|post|put</format>
+                        <description>HTTP method used for health checking</description>
+                      </valueHelp>
+                      <constraint>
+                        <regex>(options|head|get|post|put)</regex>
+                      </constraint>
                     </properties>
                   </leafNode>
+                  <leafNode name="uri">
+                    <properties>
+                      <help>URI used for HTTP health check (Example: '/' or '/health')</help>
+                      <constraint>
+                        <regex>^\/([^?#\s]*)(\?[^#\s]*)?$</regex>
+                      </constraint>
+                    </properties>
+                  </leafNode>
+                  <node name="expect">
+                    <properties>
+                      <help>Expected response for the health check to pass</help>
+                    </properties>
+                    <children>
+                      <leafNode name="status">
+                        <properties>
+                          <help>Expected response status code for the health check to pass</help>
+                          <valueHelp>
+                            <format>u32:200-399</format>
+                            <description>Expected response code</description>
+                          </valueHelp>
+                          <constraint>
+                            <validator name="numeric" argument="--range 200-399"/>
+                          </constraint>
+                          <constraintErrorMessage>Status code must be in range 200-399</constraintErrorMessage>
+                        </properties>
+                      </leafNode>
+                      <leafNode name="string">
+                        <properties>
+                          <help>Expected to be in response body for the health check to pass</help>
+                          <valueHelp>
+                            <format>txt</format>
+                            <description>A string expected to be in the response</description>
+                          </valueHelp>
+                        </properties>
+                      </leafNode>
+                    </children>
+                  </node>
                 </children>
               </node>
+              <leafNode name="health-check">
+                <properties>
+                  <help>Non HTTP health check options</help>
+                  <completionHelp>
+                    <list>ldap mysql pgsql redis smtp</list>
+                  </completionHelp>
+                  <valueHelp>
+                    <format>ldap</format>
+                    <description>LDAP protocol check</description>
+                  </valueHelp>
+                  <valueHelp>
+                    <format>mysql</format>
+                    <description>MySQL protocol check</description>
+                  </valueHelp>
+                  <valueHelp>
+                    <format>pgsql</format>
+                    <description>PostgreSQL protocol check</description>
+                  </valueHelp>
+                  <valueHelp>
+                    <format>redis</format>
+                    <description>Redis protocol check</description>
+                  </valueHelp>
+                  <valueHelp>
+                    <format>smtp</format>
+                    <description>SMTP protocol check</description>
+                  </valueHelp>
+                  <constraint>
+                    <regex>(ldap|mysql|redis|pgsql|smtp)</regex>
+                  </constraint>
+                </properties>
+              </leafNode>
               #include <include/haproxy/rule-backend.xml.i>
               <tagNode name="server">
                 <properties>
@@ -157,6 +240,12 @@
                 </properties>
                 <children>
                   #include <include/pki/ca-certificate.xml.i>
+                  <leafNode name="no-verify">
+                    <properties>
+                      <help>Do not attempt to verify SSL certificates for backend servers</help>
+                      <valueless/>
+                    </properties>
+                  </leafNode>
                 </children>
               </node>
               #include <include/haproxy/timeout.xml.i>
@@ -167,6 +256,7 @@
               <help>Global perfomance parameters and limits</help>
             </properties>
             <children>
+              #include <include/haproxy/logging.xml.i>
               <leafNode name="max-connections">
                 <properties>
                   <help>Maximum allowed connections</help>

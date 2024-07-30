@@ -20,13 +20,16 @@ import unittest
 from base_vyostest_shim import VyOSUnitTestSHIM
 
 from vyos.firewall import find_nftables_rule
-from vyos.utils.file import read_file
+from vyos.utils.file import read_file, read_json
 
 base_path = ['system', 'conntrack']
 
 def get_sysctl(parameter):
     tmp = parameter.replace(r'.', r'/')
     return read_file(f'/proc/sys/{tmp}')
+
+def get_logger_config():
+    return read_json('/run/vyos-conntrack-logger.conf')
 
 class TestSystemConntrack(VyOSUnitTestSHIM.TestCase):
     @classmethod
@@ -67,66 +70,6 @@ class TestSystemConntrack(VyOSUnitTestSHIM.TestCase):
                 'cli'           : ['tcp', 'max-retrans'],
                 'test_value'    : '128',
                 'default_value' : '3',
-            },
-            'net.netfilter.nf_conntrack_icmp_timeout' :{
-                'cli'           : ['timeout', 'icmp'],
-                'test_value'    : '180',
-                'default_value' : '30',
-            },
-            'net.netfilter.nf_conntrack_generic_timeout' :{
-                'cli'           : ['timeout', 'other'],
-                'test_value'    : '1200',
-                'default_value' : '600',
-            },
-            'net.netfilter.nf_conntrack_tcp_timeout_close_wait' :{
-                'cli'           : ['timeout', 'tcp', 'close-wait'],
-                'test_value'    : '30',
-                'default_value' : '60',
-            },
-            'net.netfilter.nf_conntrack_tcp_timeout_close' :{
-                'cli'           : ['timeout', 'tcp', 'close'],
-                'test_value'    : '20',
-                'default_value' : '10',
-            },
-            'net.netfilter.nf_conntrack_tcp_timeout_established' :{
-                'cli'           : ['timeout', 'tcp', 'established'],
-                'test_value'    : '1000',
-                'default_value' : '432000',
-            },
-            'net.netfilter.nf_conntrack_tcp_timeout_fin_wait' :{
-                'cli'           : ['timeout', 'tcp', 'fin-wait'],
-                'test_value'    : '240',
-                'default_value' : '120',
-            },
-            'net.netfilter.nf_conntrack_tcp_timeout_last_ack' :{
-                'cli'           : ['timeout', 'tcp', 'last-ack'],
-                'test_value'    : '300',
-                'default_value' : '30',
-            },
-            'net.netfilter.nf_conntrack_tcp_timeout_syn_recv' :{
-                'cli'           : ['timeout', 'tcp', 'syn-recv'],
-                'test_value'    : '100',
-                'default_value' : '60',
-            },
-            'net.netfilter.nf_conntrack_tcp_timeout_syn_sent' :{
-                'cli'           : ['timeout', 'tcp', 'syn-sent'],
-                'test_value'    : '300',
-                'default_value' : '120',
-            },
-            'net.netfilter.nf_conntrack_tcp_timeout_time_wait' :{
-                'cli'           : ['timeout', 'tcp', 'time-wait'],
-                'test_value'    : '303',
-                'default_value' : '120',
-            },
-            'net.netfilter.nf_conntrack_udp_timeout' :{
-                'cli'           : ['timeout', 'udp', 'other'],
-                'test_value'    : '90',
-                'default_value' : '30',
-            },
-            'net.netfilter.nf_conntrack_udp_timeout_stream' :{
-                'cli'           : ['timeout', 'udp', 'stream'],
-                'test_value'    : '200',
-                'default_value' : '180',
             },
         }
 
@@ -340,5 +283,35 @@ class TestSystemConntrack(VyOSUnitTestSHIM.TestCase):
         self.verify_nftables(nftables6_search, 'ip6 vyos_conntrack')
 
         self.cli_delete(['firewall'])
+
+    def test_conntrack_log(self):
+        expected_config = {
+            'event': {
+                'destroy': {},
+                'new': {},
+                'update': {},
+            },
+            'queue_size': '10000'
+        }
+        self.cli_set(base_path + ['log', 'event', 'destroy'])
+        self.cli_set(base_path + ['log', 'event', 'new'])
+        self.cli_set(base_path + ['log', 'event', 'update'])
+        self.cli_set(base_path + ['log', 'queue-size', '10000'])
+        self.cli_commit()
+        self.assertEqual(expected_config, get_logger_config())
+        self.assertEqual('0', get_sysctl('net.netfilter.nf_conntrack_timestamp'))
+
+        for event in ['destroy', 'new', 'update']:
+            for proto in ['icmp', 'other', 'tcp', 'udp']:
+                self.cli_set(base_path + ['log', 'event', event, proto])
+                expected_config['event'][event][proto] = {}
+        self.cli_set(base_path + ['log', 'timestamp'])
+        expected_config['timestamp'] = {}
+        self.cli_commit()
+
+        self.assertEqual(expected_config, get_logger_config())
+        self.assertEqual('1', get_sysctl('net.netfilter.nf_conntrack_timestamp'))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

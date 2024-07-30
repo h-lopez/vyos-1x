@@ -55,17 +55,13 @@ op_mode_definitions: $(op_xml_obj)
 
 	find $(BUILD_DIR)/op-mode-definitions/ -type f -name "*.xml" | xargs -I {} $(CURDIR)/scripts/build-command-op-templates {} $(CURDIR)/schema/op-mode-definition.rng $(OP_TMPL_DIR) || exit 1
 
-	# XXX: delete top level op mode node.def's that now live in other packages
-	rm -f $(OP_TMPL_DIR)/add/node.def
-	rm -f $(OP_TMPL_DIR)/clear/interfaces/node.def
-	rm -f $(OP_TMPL_DIR)/clear/node.def
-	rm -f $(OP_TMPL_DIR)/delete/node.def
-
-	# XXX: ping, traceroute and mtr must be able to recursivly call themselves as the
+	# XXX: tcpdump, ping, traceroute and mtr must be able to recursivly call themselves as the
 	# options are provided from the scripts themselves
 	ln -s ../node.tag $(OP_TMPL_DIR)/ping/node.tag/node.tag/
 	ln -s ../node.tag $(OP_TMPL_DIR)/traceroute/node.tag/node.tag/
 	ln -s ../node.tag $(OP_TMPL_DIR)/mtr/node.tag/node.tag/
+	ln -s ../node.tag $(OP_TMPL_DIR)/monitor/traceroute/node.tag/node.tag/
+	ln -s ../node.tag $(OP_TMPL_DIR)/monitor/traffic/interface/node.tag/node.tag/
 
 	# XXX: test if there are empty node.def files - this is not allowed as these
 	# could mask help strings or mandatory priority statements
@@ -76,18 +72,7 @@ vyshim:
 	$(MAKE) -C $(SHIM_DIR)
 
 .PHONY: all
-all: clean interface_definitions op_mode_definitions check test j2lint vyshim
-
-.PHONY: check
-.ONESHELL:
-check:
-	@echo "Checking which CLI scripts are not enabled to work with vyos-configd..."
-	@for file in `ls src/conf_mode -I__pycache__`
-	do
-		if ! grep -q $$file data/configd-include.json; then
-			echo "* $$file"
-		fi
-	done
+all: clean interface_definitions op_mode_definitions test j2lint vyshim generate-configd-include-json
 
 .PHONY: clean
 clean:
@@ -97,9 +82,15 @@ clean:
 	$(MAKE) -C $(SHIM_DIR) clean
 
 .PHONY: test
-test:
+test: generate-configd-include-json
 	set -e; python3 -m compileall -q -x '/vmware-tools/scripts/, /ppp/' .
 	PYTHONPATH=python/ python3 -m "nose" --with-xunit src --with-coverage --cover-erase --cover-xml --cover-package src/conf_mode,src/op_mode,src/completion,src/helpers,src/validators,src/tests --verbose
+
+.PHONY: check_migration_scripts_executable
+.ONESHELL:
+check_migration_scripts_executable:
+	@echo "Checking if migration scripts have executable bit set..."
+	find src/migration-scripts -type f -not -executable -print -exec false {} + || sh -c 'echo "Found files that are not executable! Add permissions." && exit 1'
 
 .PHONY: j2lint
 j2lint:
@@ -118,6 +109,10 @@ unused-imports:
 
 deb:
 	dpkg-buildpackage -uc -us -tc -b
+
+.PHONY: generate-configd-include-json
+generate-configd-include-json:
+	@scripts/generate-configd-include-json.py
 
 .PHONY: schema
 schema:

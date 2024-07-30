@@ -245,7 +245,7 @@
             <properties>
               <help>Restart DHCP server</help>
             </properties>
-            <command>if cli-shell-api existsActive service dhcp-server; then sudo systemctl restart kea-dhcp4-server.service; else echo "DHCP server not configured"; fi</command>
+            <command>sudo ${vyos_op_scripts_dir}/restart.py restart_service --name dhcp</command>
           </node>
           <node name="relay-agent">
             <properties>
@@ -264,7 +264,7 @@
             <properties>
               <help>Restart DHCPv6 server</help>
             </properties>
-            <command>if cli-shell-api existsActive service dhcpv6-server; then sudo systemctl restart kea-dhcp6-server.service; else echo "DHCPv6 server not configured"; fi</command>
+            <command>sudo ${vyos_op_scripts_dir}/restart.py restart_service --name dhcpv6</command>
           </node>
           <node name="relay-agent">
             <properties>
@@ -310,6 +310,45 @@
               </completionHelp>
             </properties>
             <command>sudo ${vyos_op_scripts_dir}/dhcp.py renew_client_lease --family inet6 --interface "$4"</command>
+          </tagNode>
+        </children>
+      </node>
+    </children>
+  </node>
+  <node name="release">
+    <properties>
+      <help>Release specified variable</help>
+    </properties>
+    <children>
+      <node name="dhcp">
+        <properties>
+          <help>Release DHCP client lease</help>
+        </properties>
+        <children>
+          <tagNode name="interface">
+            <properties>
+              <help>Release DHCP client lease for specified interface</help>
+              <completionHelp>
+                <script>${vyos_completion_dir}/list_interfaces</script>
+              </completionHelp>
+            </properties>
+            <command>sudo ${vyos_op_scripts_dir}/dhcp.py release_client_lease --family inet --interface "$4"</command>
+          </tagNode>
+        </children>
+      </node>
+      <node name="dhcpv6">
+        <properties>
+          <help>Release DHCPv6 client lease</help>
+        </properties>
+        <children>
+          <tagNode name="interface">
+            <properties>
+              <help>Release DHCPv6 client lease for specified interface</help>
+              <completionHelp>
+                <script>${vyos_completion_dir}/list_interfaces</script>
+              </completionHelp>
+            </properties>
+            <command>sudo ${vyos_op_scripts_dir}/dhcp.py release_client_lease --family inet6 --interface "$4"</command>
           </tagNode>
         </children>
       </node>

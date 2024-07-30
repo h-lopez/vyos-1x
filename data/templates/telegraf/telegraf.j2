@@ -41,6 +41,21 @@
   bucket = "{{ influxdb.bucket }}"
 ### End InfluxDB2 ###
 {% endif %}
+{% if loki is vyos_defined %}
+### Loki ###
+[[outputs.loki]]
+  ## The domain of Loki
+  domain = "{{ loki.url }}:{{ loki.port }}"
+{%     if loki.authentication.username is vyos_defined and loki.authentication.password is vyos_defined  %}
+  ## Basic Authentication
+  username = "{{ loki.authentication.username }}"
+  password = "{{ loki.authentication.password }}"
+{%     endif %}
+{%     if loki.metric_name_label is vyos_defined %}
+metric_name_label = "{{ loki.metric_name_label }}"
+{%     endif %}
+### End Loki ###
+{% endif %}
 {% if prometheus_client is vyos_defined %}
 ### Prometheus ###
 [[outputs.prometheus_client]]
@@ -115,7 +130,9 @@
 {% if influxdb is vyos_defined %}
 [[inputs.exec]]
   commands = [
+{%     if nft_chains is vyos_defined %}
     "{{ custom_scripts_dir }}/show_firewall_input_filter.py",
+{%     endif %}
     "{{ custom_scripts_dir }}/show_interfaces_input_filter.py",
     "{{ custom_scripts_dir }}/vyos_services_input_filter.py"
   ]

@@ -18,12 +18,18 @@ Build-Depends:
   python3-xmltodict,
 # For running tests
   python3-coverage,
+  python3-hurry.filesize,
+  python3-netaddr,
   python3-netifaces,
   python3-nose,
   python3-jinja2,
+  python3-paramiko,
+  python3-passlib,
   python3-psutil,
   python3-requests,
   python3-setuptools,
+  python3-tabulate,
+  python3-zmq,
   quilt,
   whois
 Standards-Version: 3.9.6
@@ -31,14 +37,24 @@ Standards-Version: 3.9.6
 Package: vyos-1x
 Architecture: amd64 arm64
 Pre-Depends:
+  libpam-runtime [amd64],
   libnss-tacplus [amd64],
   libpam-tacplus [amd64],
   libpam-radius-auth [amd64]
 Depends:
 ## Fundamentals
   ${python3:Depends} (>= 3.10),
+  dialog,
   libvyosconfig0,
+  libpam-cap,
+  bash-completion,
+  ipvsadm,
+  udev,
+  less,
+  at,
+  rsync,
   vyatta-bash,
+  vyatta-biosdevname,
   vyatta-cfg,
   vyos-http-api-tools,
   vyos-utils,
@@ -54,6 +70,7 @@ Depends:
   python3-netifaces,
   python3-paramiko,
   python3-passlib,
+  python3-pyroute2,
   python3-psutil,
   python3-pyhumps,
   python3-pystache,
@@ -65,6 +82,7 @@ Depends:
   python3-zmq,
 ## End of Python libraries
 ## Basic System services and utilities
+  coreutils,
   sudo,
   systemd,
   bsdmainutils,
@@ -77,7 +95,6 @@ Depends:
 # ipaddrcheck is widely used in IP value validators
   ipaddrcheck,
   ethtool,
-  fdisk,
   lm-sensors,
   procps,
   netplug,
@@ -90,6 +107,14 @@ Depends:
   grc,
 ## End of System services and utilities
 ## For the installer
+  fdisk,
+  gdisk,
+  mdadm,
+  efibootmgr,
+  libefivar1,
+  dosfstools,
+  grub-efi-amd64-bin [amd64],
+  grub-efi-arm64-bin [arm64],
 # Image signature verification tool
   minisign,
 # Live filesystem tools
@@ -98,6 +123,7 @@ Depends:
 ## End installer
   auditd,
   iputils-arping,
+  iputils-ping,
   isc-dhcp-client,
 # For "vpn pptp", "vpn l2tp", "vpn sstp", "service ipoe-server"
   accel-ppp,
@@ -136,7 +162,7 @@ Depends:
   sstp-client,
 # End "interfaces sstpc"
 # For "protocols *"
-  frr (>= 7.5),
+  frr (>= 9.1),
   frr-pythontools,
   frr-rpki-rtrlib,
   frr-snmp,
@@ -163,6 +189,8 @@ Depends:
 # End "service dns dynamic"
 # # For "service ids"
   fastnetmon [amd64],
+  suricata,
+  suricata-update,
 # End "service ids"
 # # For "service ndp-proxy"
   ndppd,
@@ -170,9 +198,12 @@ Depends:
 # For "service router-advert"
   radvd,
 # End "service route-advert"
-# For "high-availability reverse-proxy"
+# For "load-balancing reverse-proxy"
   haproxy,
-# End "high-availability reverse-proxy"
+# End "load-balancing reverse-proxy"
+# For "load-balancing wan"
+  vyatta-wanloadbalance,
+# End "load-balancing wan"
 # For "service dhcp-relay"
   isc-dhcp-relay,
 # For "service dhcp-server"
@@ -195,9 +226,6 @@ Depends:
   snmp,
   snmpd,
 # End "service snmp"
-# For "service upnp"
-  miniupnpd-nftables,
-# End "service upnp"
 # For "service webproxy"
   squid,
   squidclient,
@@ -229,6 +257,9 @@ Depends:
 # For "high-availability vrrp"
   keepalived (>=2.0.5),
 # End "high-availability-vrrp"
+# For "system console"
+  util-linux,
+# End "system console"
 # For "system task-scheduler"
   cron,
 # End "system task-scheduler"
@@ -261,7 +292,7 @@ Depends:
 # For "system conntrack modules rtsp"
   nat-rtsp,
 # End "system conntrack modules rtsp"
-# For "system ntp"
+# For "service ntp"
   chrony,
 # End "system ntp"
 # For "vpn openconnect"
@@ -270,8 +301,14 @@ Depends:
 # For "system flow-accounting"
   pmacct (>= 1.6.0),
 # End "system flow-accounting"
-# For container
-  podman,
+# For "system syslog"
+  rsyslog,
+# End "system syslog"
+# For "system option keyboard-layout"
+  kbd,
+# End "system option keyboard-layout"
+# For "container"
+  podman (>=4.9.5),
   netavark,
   aardvark-dns,
 # iptables is only used for containers now, not the the firewall CLI
@@ -308,6 +345,8 @@ Depends:
   ndisc6,
 # For "run monitor bandwidth"
   bmon,
+# For "run format disk"
+  parted,
 # End Operational mode
 ## TPM tools
   cryptsetup,

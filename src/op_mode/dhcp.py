@@ -332,7 +332,7 @@ def _verify_client(func):
 
         # Check if config does not exist
         if not config.exists(f'interfaces {interface_path} address dhcp{v}'):
-            raise vyos.opmode.UnconfiguredSubsystem(unconf_message)
+            raise vyos.opmode.UnconfiguredObject(unconf_message)
         return func(*args, **kwargs)
     return _wrapper
 
@@ -509,6 +509,16 @@ def renew_client_lease(raw: bool, family: ArgFamily, interface: str):
         call(f'systemctl restart dhcp6c@{interface}.service')
     else:
         call(f'systemctl restart dhclient@{interface}.service')
+
+@_verify_client
+def release_client_lease(raw: bool, family: ArgFamily, interface: str):
+    if not raw:
+        v = 'v6' if family == 'inet6' else ''
+        print(f'Release DHCP{v} client on interface {interface}...')
+    if family == 'inet6':
+        call(f'systemctl stop dhcp6c@{interface}.service')
+    else:
+        call(f'systemctl stop dhclient@{interface}.service')
 
 if __name__ == '__main__':
     try:

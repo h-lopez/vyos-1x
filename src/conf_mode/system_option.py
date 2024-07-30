@@ -24,10 +24,14 @@ from vyos.configverify import verify_source_interface
 from vyos.configverify import verify_interface_exists
 from vyos.system import grub_util
 from vyos.template import render
+from vyos.utils.dict import dict_search
+from vyos.utils.file import write_file
+from vyos.utils.kernel import check_kmod
 from vyos.utils.process import cmd
 from vyos.utils.process import is_systemd_service_running
 from vyos.utils.network import is_addr_assigned
 from vyos.utils.network import is_intf_addr_assigned
+from vyos.configdep import set_dependents, call_dependents
 from vyos import ConfigError
 from vyos import airbag
 airbag.enable()
@@ -35,6 +39,8 @@ airbag.enable()
 curlrc_config = r'/etc/curlrc'
 ssh_config = r'/etc/ssh/ssh_config.d/91-vyos-ssh-client-options.conf'
 systemd_action_file = '/lib/systemd/system/ctrl-alt-del.target'
+usb_autosuspend = r'/etc/udev/rules.d/40-usb-autosuspend.rules'
+kernel_dynamic_debug = r'/sys/kernel/debug/dynamic_debug/control'
 time_format_to_locale = {
     '12-hour': 'en_US.UTF-8',
     '24-hour': 'en_GB.UTF-8'
@@ -49,6 +55,12 @@ def get_config(config=None):
     options = conf.get_config_dict(base, key_mangling=('-', '_'),
                                    get_first_key=True,
                                    with_recursive_defaults=True)
+
+    if 'performance' in options:
+        # Update IPv4 and IPv6 options after TuneD reapplies
+        # sysctl from config files
+        for protocol in ['ip', 'ipv6']:
+            set_dependents(protocol, conf)
 
     return options
 
@@ -85,6 +97,7 @@ def verify(options):
 def generate(options):
     render(curlrc_config, 'system/curlrc.j2', options)
     render(ssh_config, 'system/ssh_config.j2', options)
+    render(usb_autosuspend, 'system/40_usb_autosuspend.j2', options)
 
     cmdline_options = []
     if 'kernel' in options:
@@ -139,6 +152,8 @@ def apply(options):
     else:
         cmd('systemctl stop tuned.service')
 
+    call_dependents()
+
     # Keyboard layout - there will be always the default key inside the dict
     # but we check for key existence anyway
     if 'keyboard_layout' in options:
@@ -154,6 +169,19 @@ def apply(options):
     if 'time_format' in options:
         time_format = time_format_to_locale.get(options['time_format'])
         cmd(f'localectl set-locale LC_TIME={time_format}')
+
+    # Reload UDEV, required for USB auto suspend
+    cmd('udevadm control --reload-rules')
+
+    # Enable/disable dynamic debugging for kernel modules
+    modules = ['wireguard']
+    modules_enabled = dict_search('kernel.debug', options) or []
+    for module in modules:
+        if module in modules_enabled:
+            check_kmod(module)
+            write_file(kernel_dynamic_debug, f'module {module} +p')
+        else:
+            write_file(kernel_dynamic_debug, f'module {module} -p')
 
 if __name__ == '__main__':
     try:

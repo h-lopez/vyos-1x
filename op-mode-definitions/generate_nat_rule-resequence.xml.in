@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<interfaceDefinition>
+  <node name="generate">
+    <children>
+      <node name="nat">
+        <properties>
+          <help>Network Address Translation (NAT)</help>
+        </properties>
+        <children>
+          #include <include/rule-resequence.xml.i>
+        </children>
+      </node>
+    </children>
+  </node>
+</interfaceDefinition>

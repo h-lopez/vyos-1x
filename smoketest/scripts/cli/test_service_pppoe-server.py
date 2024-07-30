@@ -148,6 +148,46 @@ class TestServicePPPoEServer(BasicAccelPPPTest.TestCase):
         tmp = ','.join(vlans)
         self.assertIn(f'vlan-mon={interface},{tmp}', config)
 
+    def test_pppoe_server_pado_delay(self):
+        delay_without_sessions = '10'
+        delays = {'20': '200', '30': '300'}
+
+        self.basic_config()
+
+        self.set(['pado-delay', delay_without_sessions])
+        self.cli_commit()
+
+        conf = ConfigParser(allow_no_value=True, delimiters='=')
+        conf.read(self._config_file)
+        self.assertEqual(conf['pppoe']['pado-delay'], delay_without_sessions)
+
+        for delay, sessions in delays.items():
+            self.set(['pado-delay', delay, 'sessions', sessions])
+        self.cli_commit()
+
+        conf = ConfigParser(allow_no_value=True, delimiters='=')
+        conf.read(self._config_file)
+
+        self.assertEqual(conf['pppoe']['pado-delay'], '10,20:200,30:300')
+
+        self.set(['pado-delay', 'disable', 'sessions', '400'])
+        self.cli_commit()
+
+        conf = ConfigParser(allow_no_value=True, delimiters='=')
+        conf.read(self._config_file)
+        self.assertEqual(conf['pppoe']['pado-delay'], '10,20:200,30:300,-1:400')
+
+    def test_pppoe_server_any_login(self):
+        # Test configuration of local authentication for PPPoE server
+        self.basic_config()
+
+        self.set(['authentication', 'any-login'])
+        self.cli_commit()
+
+        # Validate configuration values
+        config = read_file(self._config_file)
+        self.assertIn('any-login=1', config)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

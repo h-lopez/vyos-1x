@@ -41,7 +41,7 @@ class BaseWarning:
                 isfirstmessage = False
                 initial_indent = self.standardindent
             print(f'{mes}')
-        print('')
+        print('', flush=True)
 
 
 class Warning():
@@ -58,6 +58,13 @@ class DeprecationWarning():
 
 
 class ConfigError(Exception):
+    def __init__(self, message):
+        # Reformat the message and trim it to 72 characters in length
+        message = fill(message, width=72)
+        # Call the base class constructor with the parameters it needs
+        super().__init__(message)
+
+class MigrationError(Exception):
     def __init__(self, message):
         # Reformat the message and trim it to 72 characters in length
         message = fill(message, width=72)

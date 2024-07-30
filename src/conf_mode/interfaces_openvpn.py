@@ -168,6 +168,14 @@ def verify_pki(openvpn):
                            'verification, consult the documentation for details.')
 
     if tls:
+        if mode == 'site-to-site':
+            # XXX: site-to-site with PSKs is the only mode that can work without TLS,
+            # so 'tls role' is not mandatory for it,
+            # but we need to check that if it uses peer certificate fingerprints rather than PSKs,
+            # then the TLS role is set
+            if ('shared_secret_key' not in tls) and ('role' not in tls):
+                raise ConfigError('"tls role" is required for site-to-site OpenVPN with TLS')
+
         if (mode in ['server', 'client']) and ('ca_certificate' not in tls):
             raise ConfigError(f'Must specify "tls ca-certificate" on openvpn interface {interface},\
               it is required in server and client modes')
@@ -198,6 +206,12 @@ def verify_pki(openvpn):
                 raise ConfigError(f'Cannot use encrypted private key on openvpn interface {interface}')
 
         if 'dh_params' in tls:
+            if 'dh' not in pki:
+                raise ConfigError(f'pki dh is not configured')
+            proposed_dh = tls['dh_params']
+            if proposed_dh not in pki['dh'].keys():
+                raise ConfigError(f"pki dh '{proposed_dh}' is not configured")
+
             pki_dh = pki['dh'][tls['dh_params']]
             dh_params = load_dh_parameters(pki_dh['parameters'])
             dh_numbers = dh_params.parameter_numbers()
@@ -221,10 +235,6 @@ def verify_pki(openvpn):
 
 def verify(openvpn):
     if 'deleted' in openvpn:
-        # remove totp secrets file if totp is not configured
-        if os.path.isfile(otp_file.format(**openvpn)):
-            os.remove(otp_file.format(**openvpn))
-
         verify_bridge_delete(openvpn)
         return None
 
@@ -312,8 +322,8 @@ def verify(openvpn):
             if v4addr in openvpn['local_address'] and 'subnet_mask' not in openvpn['local_address'][v4addr]:
                 raise ConfigError('Must specify IPv4 "subnet-mask" for local-address')
 
-        if dict_search('encryption.ncp_ciphers', openvpn):
-            raise ConfigError('NCP ciphers can only be used in client or server mode')
+        if dict_search('encryption.data_ciphers', openvpn):
+            raise ConfigError('Cipher negotiation can only be used in client or server mode')
 
     else:
         # checks for client-server or site-to-site bridged
@@ -418,6 +428,13 @@ def verify(openvpn):
                                 if IPv6Address(client['ipv6_ip'][0]) in v6PoolNet:
                                     print(f'Warning: Client "{client["name"]}" IP {client["ipv6_ip"][0]} is in server IP pool, it is not reserved for this client.')
 
+        if 'topology' in openvpn['server']:
+            if openvpn['server']['topology'] == 'net30':
+                DeprecationWarning('Topology net30 is deprecated '\
+                                   'and will be removed in future VyOS versions. '\
+                                   'Switch to "subnet" or "p2p"'
+                )
+
         # add mfa users to the file the mfa plugin uses
         if dict_search('server.mfa.totp', openvpn):
             user_data = ''
@@ -500,6 +517,10 @@ def verify(openvpn):
             if 'dh_params' in openvpn['tls']:
                 print('Warning: using dh-params and EC keys simultaneously will ' \
                       'lead to DH ciphers being used instead of ECDH')
+
+        if dict_search('encryption.cipher', openvpn):
+            raise ConfigError('"encryption cipher" option is deprecated for TLS mode. '
+                              'Use "encryption data-ciphers" instead')
 
     if dict_search('encryption.cipher', openvpn) == 'none':
         print('Warning: "encryption none" was specified!')
@@ -610,9 +631,19 @@ def generate_pki_files(openvpn):
 
 
 def generate(openvpn):
+    if 'deleted' in openvpn:
+        # remove totp secrets file if totp is not configured
+        if os.path.isfile(otp_file.format(**openvpn)):
+            os.remove(otp_file.format(**openvpn))
+        return None
+
+    if 'disable' in openvpn:
+        return None
+
     interface = openvpn['ifname']
     directory = os.path.dirname(cfg_file.format(**openvpn))
     openvpn['plugin_dir'] = '/usr/lib/openvpn'
+
     # create base config directory on demand
     makedir(directory, user, group)
     # enforce proper permissions on /run/openvpn
@@ -628,9 +659,6 @@ def generate(openvpn):
     service_dir = os.path.dirname(service_file.format(**openvpn))
     if os.path.isdir(service_dir):
         rmtree(service_dir, ignore_errors=True)
-
-    if 'deleted' in openvpn or 'disable' in openvpn:
-        return None
 
     # create client config directory on demand
     makedir(ccd_dir, user, group)

@@ -30,7 +30,6 @@ from vyos.defaults import directories
 from vyos.utils.boot import boot_configuration_complete
 from vyos.configsource import ConfigSourceString
 from vyos.configsource import ConfigSourceError
-from vyos.configdep import call_dependents
 from vyos.config import Config
 from vyos import ConfigError
 
@@ -134,7 +133,8 @@ def explicit_print(path, mode, msg):
     except OSError:
         logger.critical("error explicit_print")
 
-def run_script(script, config, args) -> int:
+def run_script(script_name, config, args) -> int:
+    script = conf_mode_scripts[script_name]
     script.argv = args
     config.set_level([])
     try:
@@ -143,7 +143,7 @@ def run_script(script, config, args) -> int:
         script.generate(c)
         script.apply(c)
     except ConfigError as e:
-        logger.critical(e)
+        logger.error(e)
         explicit_print(session_out, session_mode, str(e))
         return R_ERROR_COMMIT
     except Exception as e:
@@ -179,8 +179,13 @@ def initialization(socket):
     pid_string = socket.recv().decode("utf-8", "ignore")
     resp = "pid"
     socket.send(resp.encode())
+    sudo_user_string = socket.recv().decode("utf-8", "ignore")
+    resp = "sudo_user"
+    socket.send(resp.encode())
 
     logger.debug(f"config session pid is {pid_string}")
+    logger.debug(f"config session sudo_user is {sudo_user_string}")
+
     try:
         session_out = os.readlink(f"/proc/{pid_string}/fd/1")
         session_mode = 'w'
@@ -191,6 +196,8 @@ def initialization(socket):
     if not session_out or not boot_configuration_complete():
         session_out = script_stdout_log
         session_mode = 'a'
+
+    os.environ['SUDO_USER'] = sudo_user_string
 
     try:
         configsource = ConfigSourceString(running_config_text=active_string,
@@ -212,6 +219,7 @@ def process_node_data(config, data, last: bool = False) -> int:
 
     script_name = None
     args = []
+    config.dependency_list.clear()
 
     res = re.match(r'^(VYOS_TAGNODE_VALUE=[^/]+)?.*\/([^/]+).py(.*)', data)
     if res.group(1):
@@ -227,17 +235,10 @@ def process_node_data(config, data, last: bool = False) -> int:
     args.insert(0, f'{script_name}.py')
 
     if script_name not in include_set:
-        # call dependents now if last element of prio queue is run
-        # independent of configd
-        if last:
-            call_dependents(dependent_func=config.dependent_func)
         return R_PASS
 
     with stdout_redirected(session_out, session_mode):
-        result = run_script(conf_mode_scripts[script_name], config, args)
-
-    if last:
-        call_dependents(dependent_func=config.dependent_func)
+        result = run_script(script_name, config, args)
 
     return result
 
@@ -265,9 +266,6 @@ if __name__ == '__main__':
 
     cfg_group = grp.getgrnam(CFG_GROUP)
     os.setgid(cfg_group.gr_gid)
-
-    os.environ['SUDO_USER'] = 'vyos'
-    os.environ['SUDO_GID'] = str(cfg_group.gr_gid)
 
     def sig_handler(signum, frame):
         shutdown()

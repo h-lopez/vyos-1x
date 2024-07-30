@@ -123,7 +123,7 @@ class TestInterfacesOpenVPN(VyOSUnitTestSHIM.TestCase):
         interface = 'vtun2000'
         path = base_path + [interface]
         self.cli_set(path + ['mode', 'client'])
-        self.cli_set(path + ['encryption', 'ncp-ciphers', 'aes192gcm'])
+        self.cli_set(path + ['encryption', 'data-ciphers', 'aes192gcm'])
 
         # check validate() - cannot specify local-port in client mode
         self.cli_set(path + ['local-port', '5000'])
@@ -164,6 +164,12 @@ class TestInterfacesOpenVPN(VyOSUnitTestSHIM.TestCase):
             self.cli_commit()
         self.cli_delete(path + ['shared-secret-key', 'ovpn_test'])
 
+        # check validate() - cannot specify "encryption cipher" in  client mode
+        self.cli_set(path + ['encryption', 'cipher', 'aes192gcm'])
+        with self.assertRaises(ConfigSessionError):
+            self.cli_commit()
+        self.cli_delete(path + ['encryption', 'cipher'])
+
         self.cli_set(path + ['tls', 'ca-certificate', 'ovpn_test'])
         self.cli_set(path + ['tls', 'certificate', 'ovpn_test'])
 
@@ -191,7 +197,7 @@ class TestInterfacesOpenVPN(VyOSUnitTestSHIM.TestCase):
             auth_hash = 'sha1'
 
             self.cli_set(path + ['device-type', 'tun'])
-            self.cli_set(path + ['encryption', 'cipher', 'aes256'])
+            self.cli_set(path + ['encryption', 'data-ciphers', 'aes256'])
             self.cli_set(path + ['hash', auth_hash])
             self.cli_set(path + ['mode', 'client'])
             self.cli_set(path + ['persistent-tunnel'])
@@ -221,7 +227,7 @@ class TestInterfacesOpenVPN(VyOSUnitTestSHIM.TestCase):
             self.assertIn(f'remote {remote_host}', config)
             self.assertIn(f'persist-tun', config)
             self.assertIn(f'auth {auth_hash}', config)
-            self.assertIn(f'cipher AES-256-CBC', config)
+            self.assertIn(f'data-ciphers AES-256-CBC', config)
 
             # TLS options
             self.assertIn(f'ca /run/openvpn/{interface}_ca.pem', config)
@@ -328,6 +334,12 @@ class TestInterfacesOpenVPN(VyOSUnitTestSHIM.TestCase):
             self.cli_commit()
         self.cli_delete(path + ['tls', 'dh-params'])
 
+        # check validate() - cannot specify "encryption cipher" in server mode
+        self.cli_set(path + ['encryption', 'cipher', 'aes256'])
+        with self.assertRaises(ConfigSessionError):
+            self.cli_commit()
+        self.cli_delete(path + ['encryption', 'cipher'])
+
         # Now test the other path with tls role passive
         self.cli_set(path + ['tls', 'role', 'passive'])
         # check validate() - cannot specify "tcp-active" when "tls role" is "passive"
@@ -359,7 +371,7 @@ class TestInterfacesOpenVPN(VyOSUnitTestSHIM.TestCase):
             port = str(2000 + ii)
 
             self.cli_set(path + ['device-type', 'tun'])
-            self.cli_set(path + ['encryption', 'cipher', 'aes192'])
+            self.cli_set(path + ['encryption', 'data-ciphers', 'aes192'])
             self.cli_set(path + ['hash', auth_hash])
             self.cli_set(path + ['mode', 'server'])
             self.cli_set(path + ['local-port', port])
@@ -404,7 +416,7 @@ class TestInterfacesOpenVPN(VyOSUnitTestSHIM.TestCase):
             self.assertIn(f'persist-key', config)
             self.assertIn(f'proto udp', config) # default protocol
             self.assertIn(f'auth {auth_hash}', config)
-            self.assertIn(f'cipher AES-192-CBC', config)
+            self.assertIn(f'data-ciphers AES-192-CBC', config)
             self.assertIn(f'topology subnet', config)
             self.assertIn(f'lport {port}', config)
             self.assertIn(f'push "redirect-gateway def1"', config)
@@ -450,8 +462,8 @@ class TestInterfacesOpenVPN(VyOSUnitTestSHIM.TestCase):
 
         self.cli_set(path + ['mode', 'site-to-site'])
 
-        # check validate() - encryption ncp-ciphers cannot be specified in site-to-site mode
-        self.cli_set(path + ['encryption', 'ncp-ciphers', 'aes192gcm'])
+        # check validate() - cipher negotiation cannot be enabled in site-to-site mode
+        self.cli_set(path + ['encryption', 'data-ciphers', 'aes192gcm'])
         with self.assertRaises(ConfigSessionError):
             self.cli_commit()
         self.cli_delete(path + ['encryption'])

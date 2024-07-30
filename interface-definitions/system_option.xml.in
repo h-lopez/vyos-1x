@@ -49,6 +49,19 @@
                   <valueless/>
                 </properties>
               </leafNode>
+              <node name="debug">
+                <properties>
+                  <help>Dynamic debugging for kernel module</help>
+                </properties>
+                <children>
+                  <leafNode name="wireguard">
+                    <properties>
+                      <help>Dynamic debugging for Wireguard module</help>
+                      <valueless/>
+                    </properties>
+                  </leafNode>
+                </children>
+              </node>
              </children>
            </node>
            <leafNode name="keyboard-layout">
@@ -182,6 +195,12 @@
               </constraint>
             </properties>
             <defaultValue>12-hour</defaultValue>
+           </leafNode>
+           <leafNode name="disable-usb-autosuspend">
+            <properties>
+              <help>Disable autosuspend for all USB devices</help>
+              <valueless/>
+            </properties>
            </leafNode>
         </children>
       </node>

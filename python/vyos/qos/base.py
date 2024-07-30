@@ -90,6 +90,24 @@ class QoSBase:
         else:
             return value
 
+    def _calc_random_detect_queue_params(self, avg_pkt, max_thr, limit=None, min_thr=None,
+                                         mark_probability=None, precedence=0):
+        params = dict()
+        avg_pkt = int(avg_pkt)
+        max_thr = int(max_thr)
+        mark_probability = int(mark_probability)
+        limit = int(limit) if limit else 4 * max_thr
+        min_thr = int(min_thr) if min_thr else ((9 + precedence) * max_thr) // 18
+
+        params['avg_pkt'] = avg_pkt
+        params['limit'] = limit * avg_pkt
+        params['min_val'] = min_thr * avg_pkt
+        params['max_val'] = max_thr * avg_pkt
+        params['burst'] = (2 * min_thr + max_thr) // 3
+        params['probability'] = 1 / mark_probability
+
+        return params
+
     def _build_base_qdisc(self, config : dict, cls_id : int):
         """
         Add/replace qdisc for every class (also default is a class). This is
@@ -143,6 +161,18 @@ class QoSBase:
 
         elif queue_type == 'random-detect':
             default_tc += f' red'
+
+            qparams = self._calc_random_detect_queue_params(
+                avg_pkt=dict_search('average_packet', config),
+                max_thr=dict_search('maximum_threshold', config),
+                limit=dict_search('queue_limit', config),
+                min_thr=dict_search('minimum_threshold', config),
+                mark_probability=dict_search('mark_probability', config)
+            )
+
+            default_tc += f' limit {qparams["limit"]} avpkt {qparams["avg_pkt"]}'
+            default_tc += f' max {qparams["max_val"]} min {qparams["min_val"]}'
+            default_tc += f' burst {qparams["burst"]} probability {qparams["probability"]}'
 
             self._cmd(default_tc)
 
@@ -217,8 +247,15 @@ class QoSBase:
                 filter_cmd_base += ' protocol all'
 
                 if 'match' in cls_config:
+                    has_filter = False
                     for index, (match, match_config) in enumerate(cls_config['match'].items(), start=1):
                         filter_cmd = filter_cmd_base
+                        if not has_filter:
+                            for key in ['mark', 'vif', 'ip', 'ipv6']:
+                                if key in match_config:
+                                    has_filter = True
+                                    break
+
                         if self.qostype == 'shaper' and 'prio ' not in filter_cmd:
                             filter_cmd += f' prio {index}'
                         if 'mark' in match_config:
@@ -305,7 +342,8 @@ class QoSBase:
                     vlan_expression = "match.*.vif"
                     match_vlan = jmespath.search(vlan_expression, cls_config)
 
-                    if any(tmp in ['exceed', 'bandwidth', 'burst'] for tmp in cls_config):
+                    if any(tmp in ['exceed', 'bandwidth', 'burst'] for tmp in cls_config) \
+                        and has_filter:
                         # For "vif" "basic match" is used instead of "action police" T5961
                         if not match_vlan:
                             filter_cmd += f' action police'

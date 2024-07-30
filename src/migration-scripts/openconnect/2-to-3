@@ -1,0 +1,30 @@
+# Copyright 2024 VyOS maintainers and contributors <maintainers@vyos.io>
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this library.  If not, see <http://www.gnu.org/licenses/>.
+
+# T4982: Retain prior default TLS version (v1.0) when upgrading installations with existing openconnect configurations
+
+from vyos.configtree import ConfigTree
+
+cfg_base = ['vpn', 'openconnect']
+
+def migrate(config: ConfigTree) -> None:
+    # bail out early if service is unconfigured
+    if not config.exists(cfg_base):
+        return
+
+    # new default is TLS 1.2 - set explicit old default value of TLS 1.0 for upgraded configurations to keep compatibility
+    tls_min_path = cfg_base + ['tls-version-min']
+    if not config.exists(tls_min_path):
+        config.set(tls_min_path, value='1.0')

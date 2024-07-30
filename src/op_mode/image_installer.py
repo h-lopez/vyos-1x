@@ -23,9 +23,12 @@ from shutil import copy, chown, rmtree, copytree
 from glob import glob
 from sys import exit
 from os import environ
+from os import readlink
+from os import getpid, getppid
 from typing import Union
 from urllib.parse import urlparse
 from passlib.hosts import linux_context
+from errno import ENOSPC
 
 from psutil import disk_partitions
 
@@ -37,13 +40,14 @@ from vyos.template import render
 from vyos.utils.io import ask_input, ask_yes_no, select_entry
 from vyos.utils.file import chmod_2775
 from vyos.utils.process import cmd, run
-from vyos.version import get_remote_version
+from vyos.version import get_remote_version, get_version_data
 
 # define text messages
 MSG_ERR_NOT_LIVE: str = 'The system is already installed. Please use "add system image" instead.'
 MSG_ERR_LIVE: str = 'The system is in live-boot mode. Please use "install image" instead.'
 MSG_ERR_NO_DISK: str = 'No suitable disk was found. There must be at least one disk of 2GB or greater size.'
 MSG_ERR_IMPROPER_IMAGE: str = 'Missing sha256sum.txt.\nEither this image is corrupted, or of era 1.2.x (md5sum) and would downgrade image tools;\ndisallowed in either case.'
+MSG_ERR_ARCHITECTURE_MISMATCH: str = 'Upgrading to a different image architecture will break your system.'
 MSG_INFO_INSTALL_WELCOME: str = 'Welcome to VyOS installation!\nThis command will install VyOS to your permanent storage.'
 MSG_INFO_INSTALL_EXIT: str = 'Exiting from VyOS installation'
 MSG_INFO_INSTALL_SUCCESS: str = 'The image installed successfully; please reboot now.'
@@ -60,10 +64,11 @@ MSG_INPUT_CONFIG_CHOICE: str = 'The following config files are available for boo
 MSG_INPUT_CONFIG_CHOOSE: str = 'Which file would you like as boot config?'
 MSG_INPUT_IMAGE_NAME: str = 'What would you like to name this image?'
 MSG_INPUT_IMAGE_DEFAULT: str = 'Would you like to set the new image as the default one for boot?'
-MSG_INPUT_PASSWORD: str = 'Please enter a password for the "vyos" user'
+MSG_INPUT_PASSWORD: str = 'Please enter a password for the "vyos" user:'
+MSG_INPUT_PASSWORD_CONFIRM: str = 'Please confirm password for the "vyos" user:'
 MSG_INPUT_ROOT_SIZE_ALL: str = 'Would you like to use all the free space on the drive?'
 MSG_INPUT_ROOT_SIZE_SET: str = 'Please specify the size (in GB) of the root partition (min is 1.5 GB)?'
-MSG_INPUT_CONSOLE_TYPE: str = 'What console should be used by default? (K: KVM, S: Serial, U: USB-Serial)?'
+MSG_INPUT_CONSOLE_TYPE: str = 'What console should be used by default? (K: KVM, S: Serial)?'
 MSG_INPUT_COPY_DATA: str = 'Would you like to copy data to the new image?'
 MSG_INPUT_CHOOSE_COPY_DATA: str = 'From which image would you like to save config information?'
 MSG_INPUT_COPY_ENC_DATA: str = 'Would you like to copy the encrypted config to the new image?'
@@ -74,6 +79,10 @@ MSG_WARN_ROOT_SIZE_TOOBIG: str = 'The size is too big. Try again.'
 MSG_WARN_ROOT_SIZE_TOOSMALL: str = 'The size is too small. Try again'
 MSG_WARN_IMAGE_NAME_WRONG: str = 'The suggested name is unsupported!\n'\
 'It must be between 1 and 64 characters long and contains only the next characters: .+-_ a-z A-Z 0-9'
+MSG_WARN_PASSWORD_CONFIRM: str = 'The entered values did not match. Try again'
+MSG_WARN_FLAVOR_MISMATCH: str = 'The running image flavor is "{0}". The new image flavor is "{1}".\n' \
+'Installing a different image flavor may cause functionality degradation or break your system.\n' \
+'Do you want to continue with installation?'
 CONST_MIN_DISK_SIZE: int = 2147483648  # 2 GB
 CONST_MIN_ROOT_SIZE: int = 1610612736  # 1.5 GB
 # a reserved space: 2MB for header, 1 MB for BIOS partition, 256 MB for EFI
@@ -611,6 +620,20 @@ def copy_ssh_host_keys() -> bool:
     return False
 
 
+def console_hint() -> str:
+    pid = getppid() if 'SUDO_USER' in environ else getpid()
+    try:
+        path = readlink(f'/proc/{pid}/fd/1')
+    except OSError:
+        path = '/dev/tty'
+
+    name = Path(path).name
+    if name == 'ttyS0':
+        return 'S'
+    else:
+        return 'K'
+
+
 def cleanup(mounts: list[str] = [], remove_items: list[str] = []) -> None:
     """Clean up after installation
 
@@ -674,6 +697,31 @@ def is_raid_install(install_object: Union[disk.DiskDetails, raid.RaidDetails]) -
     return False
 
 
+def validate_compatibility(iso_path: str) -> None:
+    """Check architecture and flavor compatibility with the running image
+
+    Args:
+        iso_path (str): a path to the mounted ISO image
+    """
+    old_data = get_version_data()
+    old_flavor = old_data.get('flavor', '')
+    old_architecture = old_data.get('architecture') or cmd('dpkg --print-architecture')
+
+    new_data = get_version_data(f'{iso_path}/version.json')
+    new_flavor = new_data.get('flavor', '')
+    new_architecture = new_data.get('architecture', '')
+
+    if not old_architecture == new_architecture:
+        print(MSG_ERR_ARCHITECTURE_MISMATCH)
+        cleanup()
+        exit(MSG_INFO_INSTALL_EXIT)
+
+    if not old_flavor == new_flavor:
+        if not ask_yes_no(MSG_WARN_FLAVOR_MISMATCH.format(old_flavor, new_flavor), default=False):
+            cleanup()
+            exit(MSG_INFO_INSTALL_EXIT)
+
+
 def install_image() -> None:
     """Install an image to a disk
     """
@@ -695,14 +743,20 @@ def install_image() -> None:
         print(MSG_WARN_IMAGE_NAME_WRONG)
 
     # ask for password
-    user_password: str = ask_input(MSG_INPUT_PASSWORD, default='vyos',
-                                   no_echo=True)
+    while True:
+        user_password: str = ask_input(MSG_INPUT_PASSWORD, no_echo=True,
+                                       non_empty=True)
+        confirm: str = ask_input(MSG_INPUT_PASSWORD_CONFIRM, no_echo=True,
+                                 non_empty=True)
+        if user_password == confirm:
+            break
+        print(MSG_WARN_PASSWORD_CONFIRM)
 
     # ask for default console
     console_type: str = ask_input(MSG_INPUT_CONSOLE_TYPE,
-                                  default='K',
-                                  valid_responses=['K', 'S', 'U'])
-    console_dict: dict[str, str] = {'K': 'tty', 'S': 'ttyS', 'U': 'ttyUSB'}
+                                  default=console_hint(),
+                                  valid_responses=['K', 'S'])
+    console_dict: dict[str, str] = {'K': 'tty', 'S': 'ttyS'}
 
     config_boot_list = ['/opt/vyatta/etc/config/config.boot',
                         '/opt/vyatta/etc/config.boot.default']
@@ -851,6 +905,9 @@ def add_image(image_path: str, vrf: str = None, username: str = '',
         Path(DIR_ISO_MOUNT).mkdir(mode=0o755, parents=True)
         disk.partition_mount(iso_path, DIR_ISO_MOUNT, 'iso9660')
 
+        print('Validating image compatibility')
+        validate_compatibility(DIR_ISO_MOUNT)
+
         # check sums
         print('Validating image checksums')
         if not Path(DIR_ISO_MOUNT).joinpath('sha256sum.txt').exists():
@@ -930,6 +987,16 @@ def add_image(image_path: str, vrf: str = None, username: str = '',
         grub.version_add(image_name, root_dir)
         if set_as_default:
             grub.set_default(image_name, root_dir)
+
+    except OSError as e:
+        # if no space error, remove image dir and cleanup
+        if e.errno == ENOSPC:
+            cleanup(mounts=[str(iso_path)],
+                    remove_items=[f'{root_dir}/boot/{image_name}'])
+        else:
+            # unmount an ISO and cleanup
+            cleanup([str(iso_path)])
+        exit(f'Error: {e}')
 
     except Exception as err:
         # unmount an ISO and cleanup

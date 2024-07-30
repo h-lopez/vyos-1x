@@ -1,0 +1,35 @@
+set interfaces ethernet eth0 address '192.168.150.1/24'
+set service ntp allow-client address '0.0.0.0/0'
+set service ntp allow-client address '::/0'
+set service ntp server time1.vyos.net
+set service ntp server time2.vyos.net
+set service ntp server time3.vyos.net
+set system config-management commit-revisions '100'
+set system conntrack modules ftp
+set system conntrack modules h323
+set system conntrack modules nfs
+set system conntrack modules pptp
+set system conntrack modules sip
+set system conntrack modules sqlnet
+set system conntrack modules tftp
+set system console device ttyS0 speed '115200'
+set system host-name 'vyos'
+set system login user vyos authentication encrypted-password '$6$2Ta6TWHd/U$NmrX0x9kexCimeOcYK1MfhMpITF9ELxHcaBU/znBq.X2ukQOj61fVI2UYP/xBzP4QtiTcdkgs7WOQMHWsRymO/'
+set system login user vyos authentication plaintext-password ''
+set system syslog global facility all level 'info'
+set system syslog global facility local7 level 'debug'
+set vpn openconnect authentication local-users username test password 'test'
+set vpn openconnect authentication mode local 'password'
+set vpn openconnect network-settings client-ip-settings subnet '192.168.160.0/24'
+set vpn openconnect ssl ca-certificate 'openconnect'
+set vpn openconnect ssl certificate 'openconnect'
+set vpn openconnect tls-version-min '1.0'
+set vpn sstp authentication local-users username test password 'test'
+set vpn sstp authentication mode 'local'
+set vpn sstp authentication protocols 'mschap-v2'
+set vpn sstp client-ip-pool default-range-pool range '192.168.170.0/24'
+set vpn sstp default-pool 'default-range-pool'
+set vpn sstp gateway-address '192.168.150.1'
+set vpn sstp port '8443'
+set vpn sstp ssl ca-certificate 'sstp'
+set vpn sstp ssl certificate 'sstp'

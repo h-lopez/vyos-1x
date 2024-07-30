@@ -16,6 +16,9 @@ net-snmp
 {% if limits is vyos_defined %}
 connlimit
 {% endif %}
+{% if extended_scripts is vyos_defined %}
+pppd_compat
+{% endif %}
 
 [core]
 thread-count={{ thread_count }}
@@ -29,7 +32,9 @@ max-starting={{ max_concurrent_sessions }}
 [log]
 syslog=accel-sstp,daemon
 copy=1
-level=5
+{% if log.level is vyos_defined %}
+level={{ log.level }}
+{% endif %}
 
 [client-ip-range]
 0.0.0.0/0
@@ -42,6 +47,9 @@ accept=ssl
 ssl-ca-file=/run/accel-pppd/sstp-ca.pem
 ssl-pemfile=/run/accel-pppd/sstp-cert.pem
 ssl-keyfile=/run/accel-pppd/sstp-cert.key
+{% if host_name is vyos_defined %}
+host-name={{ host_name }}
+{% endif %}
 {% if default_pool is vyos_defined %}
 ip-pool={{ default_pool }}
 {% endif %}

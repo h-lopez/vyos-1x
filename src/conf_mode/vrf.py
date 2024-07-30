@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from sys import exit
+from jmespath import search
 from json import loads
 
 from vyos.config import Config
@@ -26,7 +27,7 @@ from vyos.ifconfig import Interface
 from vyos.template import render
 from vyos.template import render_to_string
 from vyos.utils.dict import dict_search
-from vyos.utils.network import get_interface_config
+from vyos.utils.network import get_vrf_tableid
 from vyos.utils.network import get_vrf_members
 from vyos.utils.network import interface_exists
 from vyos.utils.process import call
@@ -69,6 +70,14 @@ def has_rule(af : str, priority : int, table : str=None):
             if tmp['priority'] == priority:
                 return True
     return False
+
+def is_nft_vrf_zone_rule_setup() -> bool:
+    """
+    Check if an nftables connection tracking rule already exists
+    """
+    tmp = loads(cmd('sudo nft -j list table inet vrf_zones'))
+    num_rules = len(search("nftables[].rule[].chain", tmp))
+    return bool(num_rules)
 
 def vrf_interfaces(c, match):
     matched = []
@@ -130,11 +139,6 @@ def get_config(config=None):
     tmp = {'policy' : {'route-map' : conf.get_config_dict(['policy', 'route-map'],
                                                           get_first_key=True)}}
 
-    # L3VNI setup is done via vrf_vni.py as it must be de-configured (on node
-    # deletetion prior to the BGP process. Tell the Jinja2 template no VNI
-    # setup is needed
-    vrf.update({'no_vni' : ''})
-
     # Merge policy dict into "regular" config dict
     vrf = dict_merge(tmp, vrf)
     return vrf
@@ -165,8 +169,8 @@ def verify(vrf):
 
             # routing table id can't be changed - OS restriction
             if interface_exists(name):
-                tmp = str(dict_search('linkinfo.info_data.table', get_interface_config(name)))
-                if tmp and tmp != vrf_config['table']:
+                tmp = get_vrf_tableid(name)
+                if tmp and tmp != int(vrf_config['table']):
                     raise ConfigError(f'VRF "{name}" table id modification not possible!')
 
             # VRF routing table ID must be unique on the system
@@ -269,6 +273,7 @@ def apply(vrf):
             if not has_rule(afi, 2000, 'l3mdev'):
                 call(f'ip {afi} rule add pref 2000 l3mdev unreachable')
 
+        nft_vrf_zone_rule_setup = False
         for name, config in vrf['name'].items():
             table = config['table']
             if not interface_exists(name):
@@ -307,13 +312,32 @@ def apply(vrf):
             nft_add_element = f'add element inet vrf_zones ct_iface_map {{ "{name}" : {table} }}'
             cmd(f'nft {nft_add_element}')
 
-        if vrf['conntrack']:
+        # Only call into nftables as long as there is nothing setup to avoid wasting
+        # CPU time and thus lenghten the commit process
+        if not nft_vrf_zone_rule_setup:
+            nft_vrf_zone_rule_setup = is_nft_vrf_zone_rule_setup()
+        # Install nftables conntrack rules only once
+        if vrf['conntrack'] and not nft_vrf_zone_rule_setup:
             for chain, rule in nftables_rules.items():
                 cmd(f'nft add rule inet vrf_zones {chain} {rule}')
 
     if 'name' not in vrf or not vrf['conntrack']:
         for chain, rule in nftables_rules.items():
             cmd(f'nft flush chain inet vrf_zones {chain}')
+
+    # Return default ip rule values
+    if 'name' not in vrf:
+        for afi in ['-4', '-6']:
+            # move lookup local to pref 0 (from 32765)
+            if not has_rule(afi, 0, 'local'):
+                call(f'ip {afi} rule add pref 0 from all lookup local')
+            if has_rule(afi, 32765, 'local'):
+                call(f'ip {afi} rule del pref 32765 table local')
+
+            if has_rule(afi, 1000, 'l3mdev'):
+                call(f'ip {afi} rule del pref 1000 l3mdev protocol kernel')
+            if has_rule(afi, 2000, 'l3mdev'):
+                call(f'ip {afi} rule del pref 2000 l3mdev unreachable')
 
     # Apply FRR filters
     zebra_daemon = 'zebra'

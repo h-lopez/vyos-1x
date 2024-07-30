@@ -47,6 +47,12 @@
                   </leafNode>
                 </children>
               </node>
+              <leafNode name="any-login">
+                <properties>
+                  <help>Authentication with any login</help>
+                  <valueless/>
+                </properties>
+              </leafNode>
             </children>
           </node>
           <tagNode name="interface">
@@ -74,11 +80,19 @@
             <properties>
               <help>PADO delays</help>
               <valueHelp>
+                <format>disable</format>
+                <description>Disable new connections</description>
+              </valueHelp>
+              <completionHelp>
+                <list>disable</list>
+              </completionHelp>
+              <valueHelp>
                 <format>u32:1-999999</format>
                 <description>Number in ms</description>
               </valueHelp>
               <constraint>
                 <validator name="numeric" argument="--range 1-999999"/>
+                <regex>disable</regex>
               </constraint>
               <constraintErrorMessage>Invalid PADO delay</constraintErrorMessage>
             </properties>
@@ -145,6 +159,7 @@
           #include <include/accel-ppp/wins-server.xml.i>
           #include <include/generic-description.xml.i>
           #include <include/name-server-ipv4-ipv6.xml.i>
+          #include <include/accel-ppp/log.xml.i>
         </children>
       </node>
     </children>

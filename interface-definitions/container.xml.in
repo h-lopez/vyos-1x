@@ -15,9 +15,15 @@
           <constraintErrorMessage>Container name must be alphanumeric and can contain hyphens</constraintErrorMessage>
         </properties>
         <children>
+          <leafNode name="allow-host-pid">
+            <properties>
+              <help>Allow sharing host process namespace with container</help>
+              <valueless/>
+            </properties>
+          </leafNode>
           <leafNode name="allow-host-networks">
             <properties>
-              <help>Allow host networks in container</help>
+              <help>Allow sharing host networking with container</help>
               <valueless/>
             </properties>
           </leafNode>
@@ -65,6 +71,35 @@
               <multi/>
             </properties>
           </leafNode>
+          <node name="sysctl">
+            <properties>
+              <help>Configure namespaced kernel parameters of the container</help>
+            </properties>
+            <children>
+              <tagNode name="parameter">
+                <properties>
+                  <help>Sysctl key name</help>
+                  <completionHelp>
+                    <script>${vyos_completion_dir}/list_container_sysctl_parameters.sh</script>
+                  </completionHelp>
+                  <valueHelp>
+                    <format>txt</format>
+                    <description>Sysctl key name</description>
+                  </valueHelp>
+                  <constraint>
+                    <validator name="sysctl"/>
+                  </constraint>
+                </properties>
+                <children>
+                  <leafNode name="value">
+                    <properties>
+                      <help>Sysctl configuration value</help>
+                    </properties>
+                  </leafNode>
+                </children>
+              </tagNode>
+            </children>
+          </node>
           #include <include/generic-description.xml.i>
           <tagNode name="device">
             <properties>
@@ -186,6 +221,24 @@
               </leafNode>
             </children>
           </tagNode>
+          <leafNode name="cpu-quota">
+            <properties>
+              <help>This limits the number of CPU resources the container can use</help>
+              <valueHelp>
+                <format>u32:0</format>
+                <description>Unlimited</description>
+              </valueHelp>
+              <valueHelp>
+                <format>txt</format>
+                <description>Amount of CPU time the container can use in amount of cores (up to three decimals)</description>
+              </valueHelp>
+              <constraint>
+                <regex>(0|[1-9]\d*)(\.\d{1,3})?</regex>
+              </constraint>
+              <constraintErrorMessage>Container CPU limit must be a (decimal) number in range 0 to number of threads</constraintErrorMessage>
+            </properties>
+            <defaultValue>0</defaultValue>
+          </leafNode>
           <leafNode name="memory">
             <properties>
               <help>Memory (RAM) available to this container</help>

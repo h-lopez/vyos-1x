@@ -24,7 +24,6 @@ from time import time
 
 from vyos.utils.io import ask_yes_no
 from vyos.utils.process import call
-from vyos.utils.process import cmd
 from vyos.utils.process import run
 from vyos.utils.process import STDOUT
 
@@ -110,18 +109,22 @@ def check_unsaved_config():
     from vyos.config_mgmt import unsaved_commits
     from vyos.utils.boot import boot_configuration_success
 
-    if unsaved_commits() and boot_configuration_success():
+    if unsaved_commits(allow_missing_config=True) and boot_configuration_success():
         print("Warning: there are unsaved configuration changes!")
         print("Run 'save' command if you do not want to lose those changes after reboot/shutdown.")
     else:
         pass
 
 def execute_shutdown(time, reboot=True, ask=True):
+    from vyos.utils.process import cmd
+
     check_unsaved_config()
+
+    host = cmd("hostname --fqdn")
 
     action = "reboot" if reboot else "poweroff"
     if not ask:
-        if not ask_yes_no(f"Are you sure you want to {action} this system?"):
+        if not ask_yes_no(f"Are you sure you want to {action} this system ({host})?"):
             exit(0)
     action_cmd = "-r" if reboot else "-P"
 

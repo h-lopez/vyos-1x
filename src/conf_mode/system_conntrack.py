@@ -13,17 +13,19 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+import json
 import os
 
 from sys import exit
 
+from vyos.base import Warning
 from vyos.config import Config
 from vyos.configdep import set_dependents, call_dependents
 from vyos.utils.dict import dict_search
 from vyos.utils.dict import dict_search_args
 from vyos.utils.dict import dict_search_recursive
-from vyos.utils.process import cmd
+from vyos.utils.file import write_file
+from vyos.utils.process import cmd, call
 from vyos.utils.process import rc_cmd
 from vyos.template import render
 from vyos import ConfigError
@@ -33,6 +35,7 @@ airbag.enable()
 conntrack_config = r'/etc/modprobe.d/vyatta_nf_conntrack.conf'
 sysctl_file = r'/run/sysctl/10-vyos-conntrack.conf'
 nftables_ct_file = r'/run/nftables-ct.conf'
+vyos_conntrack_logger_config = r'/run/vyos-conntrack-logger.conf'
 
 # Every ALG (Application Layer Gateway) consists of either a Kernel Object
 # also called a Kernel Module/Driver or some rules present in iptables
@@ -112,6 +115,7 @@ def get_config(config=None):
 
     return conntrack
 
+
 def verify(conntrack):
     for inet in ['ipv4', 'ipv6']:
         if dict_search_args(conntrack, 'ignore', inet, 'rule') != None:
@@ -165,6 +169,8 @@ def verify(conntrack):
                                     if not group_obj:
                                         Warning(f'{error_group} "{group_name}" has no members!')
 
+            Warning(f'It is prefered to define {inet} conntrack ignore rules in <firewall {inet} prerouting raw> section')
+
         if dict_search_args(conntrack, 'timeout', 'custom', inet, 'rule') != None:
             for rule, rule_config in conntrack['timeout']['custom'][inet]['rule'].items():
                 if 'protocol' not in rule_config:
@@ -177,6 +183,11 @@ def verify(conntrack):
 def generate(conntrack):
     if not os.path.exists(nftables_ct_file):
         conntrack['first_install'] = True
+
+    if 'log' not in conntrack:
+        # Remove old conntrack-logger config and return
+        if os.path.exists(vyos_conntrack_logger_config):
+            os.unlink(vyos_conntrack_logger_config)
 
     # Determine if conntrack is needed
     conntrack['ipv4_firewall_action'] = 'return'
@@ -196,6 +207,11 @@ def generate(conntrack):
     render(conntrack_config, 'conntrack/vyos_nf_conntrack.conf.j2', conntrack)
     render(sysctl_file, 'conntrack/sysctl.conf.j2', conntrack)
     render(nftables_ct_file, 'conntrack/nftables-ct.j2', conntrack)
+
+    if 'log' in conntrack:
+        log_conf_json = json.dumps(conntrack['log'], indent=4)
+        write_file(vyos_conntrack_logger_config, log_conf_json)
+
     return None
 
 def apply(conntrack):
@@ -240,7 +256,11 @@ def apply(conntrack):
     # See: https://bugzilla.redhat.com/show_bug.cgi?id=1264080
     cmd(f'sysctl -f {sysctl_file}')
 
+    if 'log' in conntrack:
+        call(f'systemctl restart vyos-conntrack-logger.service')
+
     return None
+
 
 if __name__ == '__main__':
     try:

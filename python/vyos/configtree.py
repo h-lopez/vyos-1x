@@ -1,5 +1,5 @@
 # configtree -- a standalone VyOS config file manipulation library (Python bindings)
-# Copyright (C) 2018-2022 VyOS maintainers and contributors
+# Copyright (C) 2018-2024 VyOS maintainers and contributors
 #
 # This library is free software; you can redistribute it and/or modify it under the terms of
 # the GNU Lesser General Public License as published by the Free Software Foundation;
@@ -15,6 +15,7 @@
 import os
 import re
 import json
+import logging
 
 from ctypes import cdll, c_char_p, c_void_p, c_int, c_bool
 
@@ -161,6 +162,8 @@ class ConfigTree(object):
             self.__version = ''
 
         self.__migration = os.environ.get('VYOS_MIGRATION')
+        if self.__migration:
+            self.migration_log = logging.getLogger('vyos.migrate')
 
     def __del__(self):
         if self.__config is not None:
@@ -175,9 +178,11 @@ class ConfigTree(object):
     def get_version_string(self):
         return self.__version
 
-    def to_string(self, ordered_values=False):
+    def to_string(self, ordered_values=False, no_version=False):
         config_string = self.__to_string(self.__config, ordered_values).decode()
         config_string = unescape_backslash(config_string)
+        if no_version:
+            return config_string
         config_string = "{0}\n{1}".format(config_string, self.__version)
         return config_string
 
@@ -213,7 +218,7 @@ class ConfigTree(object):
                 self.__set_add_value(self.__config, path_str, str(value).encode())
 
         if self.__migration:
-            print(f"- op: set path: {path} value: {value} replace: {replace}")
+            self.migration_log.info(f"- op: set path: {path} value: {value} replace: {replace}")
 
     def delete(self, path):
         check_path(path)
@@ -224,7 +229,7 @@ class ConfigTree(object):
             raise ConfigTreeError(f"Path doesn't exist: {path}")
 
         if self.__migration:
-            print(f"- op: delete path: {path}")
+            self.migration_log.info(f"- op: delete path: {path}")
 
     def delete_value(self, path, value):
         check_path(path)
@@ -240,7 +245,7 @@ class ConfigTree(object):
                 raise ConfigTreeError()
 
         if self.__migration:
-            print(f"- op: delete_value path: {path} value: {value}")
+            self.migration_log.info(f"- op: delete_value path: {path} value: {value}")
 
     def rename(self, path, new_name):
         check_path(path)
@@ -256,7 +261,7 @@ class ConfigTree(object):
             raise ConfigTreeError("Path [{}] doesn't exist".format(path))
 
         if self.__migration:
-            print(f"- op: rename old_path: {path} new_path: {new_path}")
+            self.migration_log.info(f"- op: rename old_path: {path} new_path: {new_path}")
 
     def copy(self, old_path, new_path):
         check_path(old_path)
@@ -273,7 +278,7 @@ class ConfigTree(object):
             raise ConfigTreeError(msg)
 
         if self.__migration:
-            print(f"- op: copy old_path: {old_path} new_path: {new_path}")
+            self.migration_log.info(f"- op: copy old_path: {old_path} new_path: {new_path}")
 
     def exists(self, path):
         check_path(path)
@@ -285,7 +290,7 @@ class ConfigTree(object):
         else:
             return True
 
-    def list_nodes(self, path):
+    def list_nodes(self, path, path_must_exist=True):
         check_path(path)
         path_str = " ".join(map(str, path)).encode()
 
@@ -293,7 +298,10 @@ class ConfigTree(object):
         res = json.loads(res_json)
 
         if res is None:
-            raise ConfigTreeError("Path [{}] doesn't exist".format(path_str))
+            if path_must_exist:
+                raise ConfigTreeError("Path [{}] doesn't exist".format(path_str))
+            else:
+                return []
         else:
             return res
 
@@ -482,3 +490,9 @@ class DiffTree:
         add = self.add.to_commands()
         delete = self.delete.to_commands(op="delete")
         return delete + "\n" + add
+
+def deep_copy(config_tree: ConfigTree) -> ConfigTree:
+    """An inelegant, but reasonably fast, copy; replace with backend copy
+    """
+    D = DiffTree(None, config_tree)
+    return D.add

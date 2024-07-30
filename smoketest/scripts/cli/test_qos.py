@@ -441,7 +441,6 @@ class TestQoS(VyOSUnitTestSHIM.TestCase):
         self.cli_commit()
 
     def test_08_random_detect(self):
-        self.skipTest('tc returns invalid JSON here - needs iproute2 fix')
         bandwidth = 5000
 
         first = True
@@ -467,8 +466,11 @@ class TestQoS(VyOSUnitTestSHIM.TestCase):
         bandwidth = 5000
         for interface in self._interfaces:
             tmp = get_tc_qdisc_json(interface)
-            import pprint
-            pprint.pprint(tmp)
+            self.assertTrue('gred' in tmp.get('kind'))
+            self.assertEqual(8, len(tmp.get('options', {}).get('vqs')))
+            self.assertEqual(8, tmp.get('options', {}).get('dp_cnt'))
+            self.assertEqual(0, tmp.get('options', {}).get('dp_default'))
+            self.assertTrue(tmp.get('options', {}).get('grio'))
 
     def test_09_rate_control(self):
         bandwidth = 5000
@@ -581,7 +583,6 @@ class TestQoS(VyOSUnitTestSHIM.TestCase):
                         dport = int(match_config['dport'])
                         self.assertEqual(f'{dport:x}', filter['options']['match']['value'])
 
-
     def test_11_shaper(self):
         bandwidth = 250
         default_bandwidth = 20
@@ -634,6 +635,224 @@ class TestQoS(VyOSUnitTestSHIM.TestCase):
             default_ceil += 1
             class_bandwidth += 1
             class_ceil += 1
+
+    def test_12_shaper_with_red_queue(self):
+        bandwidth = 100
+        default_bandwidth = 100
+        default_burst = 100
+        interface = self._interfaces[0]
+        class_bandwidth = 50
+        dst_address = '192.0.2.8/32'
+
+        shaper_name = f'qos-shaper-{interface}'
+        self.cli_set(base_path + ['interface', interface, 'egress', shaper_name])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'bandwidth', f'{bandwidth}mbit'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'bandwidth', f'{default_bandwidth}%'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'burst', f'{default_burst}'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'queue-type', 'random-detect'])
+
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '2', 'bandwidth', f'{class_bandwidth}mbit'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '2', 'match', '10', 'ip', 'destination', 'address', dst_address])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '2', 'queue-type', 'random-detect'])
+
+        # commit changes
+        self.cli_commit()
+
+        # check root htb config
+        output = cmd(f'tc class show dev {interface}')
+
+        config_entries = (
+            f'prio 0 rate {class_bandwidth}Mbit ceil 50Mbit burst 15Kb',  # specified class
+            f'prio 7 rate {default_bandwidth}Mbit ceil 100Mbit burst {default_burst}b',  # default class
+        )
+        for config_entry in config_entries:
+            self.assertIn(config_entry, output)
+
+        output = cmd(f'tc -d qdisc show dev {interface}')
+        config_entries = (
+            'qdisc red',  # use random detect
+            'limit 72Kb min 9Kb max 18Kb ewma 3 probability 0.1',  # default config for random detect
+        )
+        for config_entry in config_entries:
+            self.assertIn(config_entry, output)
+
+        # test random detect queue params
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'queue-limit', '1024'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'average-packet', '1024'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'maximum-threshold', '32'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'minimum-threshold', '16'])
+
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '2', 'queue-limit', '1024'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '2', 'average-packet', '512'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '2', 'maximum-threshold', '32'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '2', 'minimum-threshold', '16'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '2', 'mark-probability', '20'])
+
+        self.cli_commit()
+
+        output = cmd(f'tc -d qdisc show dev {interface}')
+        config_entries = (
+            'qdisc red',  # use random detect
+            'limit 1Mb min 16Kb max 32Kb ewma 3 probability 0.1',  # default config for random detect
+            'limit 512Kb min 8Kb max 16Kb ewma 3 probability 0.05',  # class config for random detect
+        )
+        for config_entry in config_entries:
+            self.assertIn(config_entry, output)
+
+    def test_13_shaper_delete_only_rule(self):
+        default_bandwidth = 100
+        default_burst = 100
+        interface = self._interfaces[0]
+        class_bandwidth = 50
+        class_ceiling = 5
+        src_address = '10.1.1.0/24'
+
+        shaper_name = f'qos-shaper-{interface}'
+        self.cli_set(base_path + ['interface', interface, 'egress', shaper_name])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'bandwidth', f'10mbit'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'bandwidth', f'{default_bandwidth}mbit'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'default', 'burst', f'{default_burst}'])
+
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '30', 'bandwidth', f'{class_bandwidth}mbit'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '30', 'ceiling', f'{class_ceiling}mbit'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '30', 'match', 'ADDRESS30', 'ip', 'source', 'address', src_address])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '30', 'match', 'ADDRESS30', 'description', 'smoketest'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '30', 'priority', '5'])
+        self.cli_set(base_path + ['policy', 'shaper', shaper_name, 'class', '30', 'queue-type', 'fair-queue'])
+
+        # commit changes
+        self.cli_commit()
+        # check root htb config
+        output = cmd(f'tc class show dev {interface}')
+
+        config_entries = (
+            f'prio 5 rate {class_bandwidth}Mbit ceil {class_ceiling}Mbit burst 15Kb',  # specified class
+            f'prio 7 rate {default_bandwidth}Mbit ceil 100Mbit burst {default_burst}b',  # default class
+        )
+        for config_entry in config_entries:
+            self.assertIn(config_entry, output)
+
+        self.assertTrue('' != cmd(f'tc filter show dev {interface}'))
+        # self.cli_delete(base_path + ['policy', 'shaper', shaper_name, 'class', '30', 'match', 'ADDRESS30'])
+        self.cli_delete(base_path + ['policy', 'shaper', shaper_name, 'class', '30', 'match', 'ADDRESS30', 'ip', 'source', 'address', src_address])
+        self.cli_commit()
+        self.assertEqual('', cmd(f'tc filter show dev {interface}'))
+
+    def test_14_policy_limiter_marked_traffic(self):
+        policy_name = 'smoke_test'
+        base_policy_path = ['qos', 'policy', 'limiter', policy_name]
+
+        self.cli_set(['qos', 'interface', self._interfaces[0], 'ingress', policy_name])
+        self.cli_set(base_policy_path + ['class', '100', 'bandwidth', '20gbit'])
+        self.cli_set(base_policy_path + ['class', '100', 'burst', '3760k'])
+        self.cli_set(base_policy_path + ['class', '100', 'match', 'INTERNAL', 'mark', '100'])
+        self.cli_set(base_policy_path + ['class', '100', 'priority', '20'])
+        self.cli_set(base_policy_path + ['default', 'bandwidth', '1gbit'])
+        self.cli_set(base_policy_path + ['default', 'burst', '125000000b'])
+        self.cli_commit()
+
+        tc_filters = cmd(f'tc filter show dev {self._interfaces[0]} ingress')
+        # class 100
+        self.assertIn('filter parent ffff: protocol all pref 20 fw chain 0', tc_filters)
+        self.assertIn('action order 1:  police 0x1 rate 20Gbit burst 3847500b mtu 2Kb action drop overhead 0b', tc_filters)
+        # default
+        self.assertIn('filter parent ffff: protocol all pref 255 basic chain 0', tc_filters)
+        self.assertIn('action order 1:  police 0x2 rate 1Gbit burst 125000000b mtu 2Kb action drop overhead 0b', tc_filters)
+
+    def test_15_traffic_match_group(self):
+        interface = self._interfaces[0]
+        self.cli_set(['qos', 'interface', interface, 'egress', 'VyOS-HTB'])
+        base_policy_path = ['qos', 'policy', 'shaper', 'VyOS-HTB']
+
+        #old syntax
+        self.cli_set(base_policy_path + ['bandwidth', '100mbit'])
+        self.cli_set(base_policy_path + ['class', '10', 'bandwidth', '40%'])
+        self.cli_set(base_policy_path + ['class', '10', 'match', 'AF11', 'ip', 'dscp', 'AF11'])
+        self.cli_set(base_policy_path + ['class', '10', 'match', 'AF41', 'ip', 'dscp', 'AF41'])
+        self.cli_set(base_policy_path + ['class', '10', 'match', 'AF43', 'ip', 'dscp', 'AF43'])
+        self.cli_set(base_policy_path + ['class', '10', 'match', 'CS4', 'ip', 'dscp', 'CS4'])
+        self.cli_set(base_policy_path + ['class', '10', 'priority', '1'])
+        self.cli_set(base_policy_path + ['class', '10', 'queue-type', 'fair-queue'])
+        self.cli_set(base_policy_path + ['class', '20', 'bandwidth', '30%'])
+        self.cli_set(base_policy_path + ['class', '20', 'match', 'EF', 'ip', 'dscp', 'EF'])
+        self.cli_set(base_policy_path + ['class', '20', 'match', 'CS5', 'ip', 'dscp', 'CS5'])
+        self.cli_set(base_policy_path + ['class', '20', 'priority', '2'])
+        self.cli_set(base_policy_path + ['class', '20', 'queue-type', 'fair-queue'])
+        self.cli_set(base_policy_path + ['default', 'bandwidth', '20%'])
+        self.cli_set(base_policy_path + ['default', 'queue-type', 'fair-queue'])
+        self.cli_commit()
+
+        tc_filters_old = cmd(f'tc -details filter show dev {interface}')
+        self.assertIn('match 00280000/00ff0000', tc_filters_old)
+        self.assertIn('match 00880000/00ff0000', tc_filters_old)
+        self.assertIn('match 00980000/00ff0000', tc_filters_old)
+        self.assertIn('match 00800000/00ff0000', tc_filters_old)
+        self.assertIn('match 00a00000/00ff0000', tc_filters_old)
+        self.assertIn('match 00b80000/00ff0000', tc_filters_old)
+        # delete config by old syntax
+        self.cli_delete(base_policy_path)
+        self.cli_delete(['qos', 'interface', interface, 'egress', 'VyOS-HTB'])
+        self.cli_commit()
+        self.assertEqual('', cmd(f'tc -s filter show dev {interface}'))
+
+        self.cli_set(['qos', 'interface', interface, 'egress', 'VyOS-HTB'])
+        # prepare traffic match group
+        self.cli_set(['qos', 'traffic-match-group', 'VOICE', 'description', 'voice shaper'])
+        self.cli_set(['qos', 'traffic-match-group', 'VOICE', 'match', 'EF', 'ip', 'dscp', 'EF'])
+        self.cli_set(['qos', 'traffic-match-group', 'VOICE', 'match', 'CS5', 'ip', 'dscp', 'CS5'])
+
+        self.cli_set(['qos', 'traffic-match-group', 'REAL_TIME_COMMON', 'description', 'real time common filters'])
+        self.cli_set(['qos', 'traffic-match-group', 'REAL_TIME_COMMON', 'match', 'AF43', 'ip', 'dscp', 'AF43'])
+        self.cli_set(['qos', 'traffic-match-group', 'REAL_TIME_COMMON', 'match', 'CS4', 'ip', 'dscp', 'CS4'])
+
+        self.cli_set(['qos', 'traffic-match-group', 'REAL_TIME', 'description', 'real time shaper'])
+        self.cli_set(['qos', 'traffic-match-group', 'REAL_TIME', 'match', 'AF41', 'ip', 'dscp', 'AF41'])
+        self.cli_set(['qos', 'traffic-match-group', 'REAL_TIME', 'match-group', 'REAL_TIME_COMMON'])
+
+        # new syntax
+        self.cli_set(base_policy_path + ['bandwidth', '100mbit'])
+        self.cli_set(base_policy_path + ['class', '10', 'bandwidth', '40%'])
+        self.cli_set(base_policy_path + ['class', '10', 'match', 'AF11', 'ip', 'dscp', 'AF11'])
+        self.cli_set(base_policy_path + ['class', '10', 'match-group', 'REAL_TIME'])
+        self.cli_set(base_policy_path + ['class', '10', 'priority', '1'])
+        self.cli_set(base_policy_path + ['class', '10', 'queue-type', 'fair-queue'])
+        self.cli_set(base_policy_path + ['class', '20', 'bandwidth', '30%'])
+        self.cli_set(base_policy_path + ['class', '20', 'match-group', 'VOICE'])
+        self.cli_set(base_policy_path + ['class', '20', 'priority', '2'])
+        self.cli_set(base_policy_path + ['class', '20', 'queue-type', 'fair-queue'])
+        self.cli_set(base_policy_path + ['default', 'bandwidth', '20%'])
+        self.cli_set(base_policy_path + ['default', 'queue-type', 'fair-queue'])
+        self.cli_commit()
+
+        self.assertEqual(tc_filters_old, cmd(f'tc -details filter show dev {interface}'))
+
+    def test_16_wrong_traffic_match_group(self):
+        interface = self._interfaces[0]
+        self.cli_set(['qos', 'interface', interface])
+
+        # Can not use both IPv6 and IPv4 in one match
+        self.cli_set(['qos', 'traffic-match-group', '1', 'match', 'one', 'ip', 'dscp', 'EF'])
+        self.cli_set(['qos', 'traffic-match-group', '1', 'match', 'one', 'ipv6', 'dscp', 'EF'])
+        with self.assertRaises(ConfigSessionError) as e:
+            self.cli_commit()
+
+        # check contain itself, should commit success
+        self.cli_delete(['qos', 'traffic-match-group', '1', 'match', 'one', 'ipv6'])
+        self.cli_set(['qos', 'traffic-match-group', '1', 'match-group', '1'])
+        self.cli_commit()
+
+        # check cycle dependency, should commit success
+        self.cli_set(['qos', 'traffic-match-group', '1', 'match-group', '3'])
+        self.cli_set(['qos', 'traffic-match-group', '2', 'match', 'one', 'ip', 'dscp', 'CS4'])
+        self.cli_set(['qos', 'traffic-match-group', '2', 'match-group', '1'])
+
+        self.cli_set(['qos', 'traffic-match-group', '3', 'match', 'one', 'ipv6', 'dscp', 'CS4'])
+        self.cli_set(['qos', 'traffic-match-group', '3', 'match-group', '2'])
+        self.cli_commit()
+
+        # inherit from non exist group, should commit success with warning
+        self.cli_set(['qos', 'traffic-match-group', '3', 'match-group', 'unexpected'])
+        self.cli_commit()
 
 
 if __name__ == '__main__':

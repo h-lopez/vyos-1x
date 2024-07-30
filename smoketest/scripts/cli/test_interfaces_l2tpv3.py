@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright (C) 2020-2021 VyOS maintainers and contributors
+# Copyright (C) 2020-2024 VyOS maintainers and contributors
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License version 2 or later as
@@ -14,13 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import os
 import json
 import unittest
 
 from base_interfaces_test import BasicInterfaceTest
 from vyos.utils.process import cmd
-
+from vyos.utils.kernel import unload_kmod
 class L2TPv3InterfaceTest(BasicInterfaceTest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -62,7 +61,6 @@ if __name__ == '__main__':
     # reloaded on demand - not needed but test more and more features
     for module in ['l2tp_ip6', 'l2tp_ip', 'l2tp_eth', 'l2tp_eth',
                    'l2tp_netlink', 'l2tp_core']:
-        if os.path.exists(f'/sys/module/{module}'):
-            cmd(f'sudo rmmod {module}')
+        unload_kmod(module)
 
     unittest.main(verbosity=2)

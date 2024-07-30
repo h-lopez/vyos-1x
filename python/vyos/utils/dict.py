@@ -34,7 +34,7 @@ def colon_separated_to_dict(data_string, uniquekeys=False):
         otherwise they are always lists of strings.
     """
     import re
-    key_value_re = re.compile('([^:]+)\s*\:\s*(.*)')
+    key_value_re = re.compile(r'([^:]+)\s*\:\s*(.*)')
 
     data_raw = re.split('\n', data_string)
 
@@ -306,6 +306,13 @@ def dict_to_paths(d: dict) -> list:
             raise ValueError('object is not a dict of strings/list of strings')
     for r in func(d, []):
         yield r
+
+def embed_dict(p: list[str], d: dict) -> dict:
+    path = p.copy()
+    ret = d
+    while path:
+        ret = {path.pop(): ret}
+    return ret
 
 def check_mutually_exclusive_options(d, keys, required=False):
     """ Checks if a dict has at most one or only one of

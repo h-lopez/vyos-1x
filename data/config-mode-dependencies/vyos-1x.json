@@ -11,7 +11,8 @@
         "ethernet": ["interfaces_ethernet"]
     },
     "interfaces_bridge": {
-        "vxlan": ["interfaces_vxlan"]
+        "vxlan": ["interfaces_vxlan"],
+        "wlan": ["interfaces_wireless"]
     },
     "load_balancing_wan": {
         "conntrack": ["system_conntrack"]
@@ -28,8 +29,11 @@
         "https": ["service_https"],
         "ipsec": ["vpn_ipsec"],
         "openconnect": ["vpn_openconnect"],
+        "reverse_proxy": ["load-balancing_reverse-proxy"],
         "rpki": ["protocols_rpki"],
-        "sstp": ["vpn_sstp"]
+        "sstp": ["vpn_sstp"],
+        "sstpc": ["interfaces_sstpc"],
+        "stunnel": ["service_stunnel"]
     },
     "vpn_ipsec": {
         "nhrp": ["protocols_nhrp"]
@@ -56,5 +60,12 @@
         "wireguard": ["interfaces_wireguard"],
         "wireless": ["interfaces_wireless"],
         "wwan": ["interfaces_wwan"]
+    },
+    "system_wireless": {
+        "wireless": ["interfaces_wireless"]
+    },
+    "system_option": {
+        "ip": ["system_ip"],
+        "ipv6": ["system_ipv6"]
     }
 }

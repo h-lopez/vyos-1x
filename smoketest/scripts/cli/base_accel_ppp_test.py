@@ -19,7 +19,7 @@ from configparser import ConfigParser
 
 from vyos.configsession import ConfigSessionError
 from vyos.template import is_ipv4
-from vyos.cpu import get_core_count
+from vyos.utils.cpu import get_core_count
 from vyos.utils.process import process_named_running
 from vyos.utils.process import cmd
 
@@ -367,6 +367,27 @@ class BasicAccelPPPTest:
                 ]
             )
 
+            self.set(
+                [
+                    "authentication",
+                    "radius",
+                    "server",
+                    radius_server,
+                    "backup",
+                ]
+            )
+
+            self.set(
+                [
+                    "authentication",
+                    "radius",
+                    "server",
+                    radius_server,
+                    "priority",
+                    "10",
+                ]
+            )
+
             # commit changes
             self.cli_commit()
 
@@ -379,6 +400,8 @@ class BasicAccelPPPTest:
             self.assertEqual(f"acct-port=0", server[3])
             self.assertEqual(f"req-limit=0", server[4])
             self.assertEqual(f"fail-time=0", server[5])
+            self.assertIn('weight=10', server)
+            self.assertIn('backup', server)
 
         def test_accel_ipv4_pool(self):
             self.basic_config(is_gateway=False, is_client_pool=False)
@@ -605,3 +628,21 @@ delegate={delegate_2_prefix},{delegate_mask},name={pool_name}"""
             self.assertEqual(conf['connlimit']['limit'], limits)
             self.assertEqual(conf['connlimit']['burst'], burst)
             self.assertEqual(conf['connlimit']['timeout'], timeout)
+
+        def test_accel_log_level(self):
+            self.basic_config()
+            self.cli_commit()
+
+            # check default value
+            conf = ConfigParser(allow_no_value=True)
+            conf.read(self._config_file)
+            self.assertEqual(conf['log']['level'], '3')
+
+            for log_level in range(0, 5):
+                self.set(['log', 'level', str(log_level)])
+                self.cli_commit()
+                # Validate configuration values
+                conf = ConfigParser(allow_no_value=True)
+                conf.read(self._config_file)
+
+                self.assertEqual(conf['log']['level'], str(log_level))

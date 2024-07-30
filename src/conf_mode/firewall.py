@@ -17,7 +17,6 @@
 import os
 import re
 
-from glob import glob
 from sys import exit
 
 from vyos.base import Warning
@@ -33,6 +32,7 @@ from vyos.template import render
 from vyos.utils.dict import dict_search_args
 from vyos.utils.dict import dict_search_recursive
 from vyos.utils.process import call
+from vyos.utils.process import cmd
 from vyos.utils.process import rc_cmd
 from vyos import ConfigError
 from vyos import airbag
@@ -40,19 +40,7 @@ from vyos import airbag
 airbag.enable()
 
 nftables_conf = '/run/nftables.conf'
-
-sysfs_config = {
-    'all_ping': {'sysfs': '/proc/sys/net/ipv4/icmp_echo_ignore_all', 'enable': '0', 'disable': '1'},
-    'broadcast_ping': {'sysfs': '/proc/sys/net/ipv4/icmp_echo_ignore_broadcasts', 'enable': '0', 'disable': '1'},
-    'ip_src_route': {'sysfs': '/proc/sys/net/ipv4/conf/*/accept_source_route'},
-    'ipv6_receive_redirects': {'sysfs': '/proc/sys/net/ipv6/conf/*/accept_redirects'},
-    'ipv6_src_route': {'sysfs': '/proc/sys/net/ipv6/conf/*/accept_source_route', 'enable': '0', 'disable': '-1'},
-    'log_martians': {'sysfs': '/proc/sys/net/ipv4/conf/all/log_martians'},
-    'receive_redirects': {'sysfs': '/proc/sys/net/ipv4/conf/*/accept_redirects'},
-    'send_redirects': {'sysfs': '/proc/sys/net/ipv4/conf/*/send_redirects'},
-    'syn_cookies': {'sysfs': '/proc/sys/net/ipv4/tcp_syncookies'},
-    'twa_hazards_protection': {'sysfs': '/proc/sys/net/ipv4/tcp_rfc1337'}
-}
+sysctl_file = r'/run/sysctl/10-vyos-firewall.conf'
 
 valid_groups = [
     'address_group',
@@ -140,7 +128,49 @@ def get_config(config=None):
 
     return firewall
 
-def verify_rule(firewall, rule_conf, ipv6):
+def verify_jump_target(firewall, root_chain, jump_target, ipv6, recursive=False):
+    targets_seen = []
+    targets_pending = [jump_target]
+
+    while targets_pending:
+        target = targets_pending.pop()
+
+        if not ipv6:
+            if target not in dict_search_args(firewall, 'ipv4', 'name'):
+                raise ConfigError(f'Invalid jump-target. Firewall name {target} does not exist on the system')
+            target_rules = dict_search_args(firewall, 'ipv4', 'name', target, 'rule')
+        else:
+            if target not in dict_search_args(firewall, 'ipv6', 'name'):
+                raise ConfigError(f'Invalid jump-target. Firewall ipv6 name {target} does not exist on the system')
+            target_rules = dict_search_args(firewall, 'ipv6', 'name', target, 'rule')
+
+        no_ipsec_in = root_chain in ('output', )
+
+        if target_rules:
+            for target_rule_conf in target_rules.values():
+                # Output hook types will not tolerate 'meta ipsec exists' matches even in jump targets:
+                if no_ipsec_in and (dict_search_args(target_rule_conf, 'ipsec', 'match_ipsec_in') is not None \
+                                    or dict_search_args(target_rule_conf, 'ipsec', 'match_none_in') is not None):
+                    if not ipv6:
+                        raise ConfigError(f'Invalid jump-target for {root_chain}. Firewall name {target} rules contain incompatible ipsec inbound matches')
+                    else:
+                        raise ConfigError(f'Invalid jump-target for {root_chain}. Firewall ipv6 name {target} rules contain incompatible ipsec inbound matches')
+                # Make sure we're not looping back on ourselves somewhere:
+                if recursive and 'jump_target' in target_rule_conf:
+                    child_target = target_rule_conf['jump_target']
+                    if child_target in targets_seen:
+                        if not ipv6:
+                            raise ConfigError(f'Loop detected in jump-targets, firewall name {target} refers to previously traversed name {child_target}')
+                        else:
+                            raise ConfigError(f'Loop detected in jump-targets, firewall ipv6 name {target} refers to previously traversed ipv6 name {child_target}')
+                    targets_pending.append(child_target)
+                    if len(targets_seen) == 7:
+                        path_txt = ' -> '.join(targets_seen)
+                        Warning(f'Deep nesting of jump targets has reached 8 levels deep, following the path {path_txt} -> {child_target}!')
+
+        targets_seen.append(target)
+
+def verify_rule(firewall, chain_name, rule_conf, ipv6):
     if 'action' not in rule_conf:
         raise ConfigError('Rule action must be defined')
 
@@ -151,12 +181,10 @@ def verify_rule(firewall, rule_conf, ipv6):
         if 'jump' not in rule_conf['action']:
             raise ConfigError('jump-target defined, but action jump needed and it is not defined')
         target = rule_conf['jump_target']
-        if not ipv6:
-            if target not in dict_search_args(firewall, 'ipv4', 'name'):
-                raise ConfigError(f'Invalid jump-target. Firewall name {target} does not exist on the system')
+        if chain_name != 'name': # This is a bit clumsy, but consolidates a chunk of code. 
+            verify_jump_target(firewall, chain_name, target, ipv6, recursive=True)
         else:
-            if target not in dict_search_args(firewall, 'ipv6', 'name'):
-                raise ConfigError(f'Invalid jump-target. Firewall ipv6 name {target} does not exist on the system')
+            verify_jump_target(firewall, chain_name, target, ipv6, recursive=False)
 
     if rule_conf['action'] == 'offload':
         if 'offload_target' not in rule_conf:
@@ -197,8 +225,10 @@ def verify_rule(firewall, rule_conf, ipv6):
                 raise ConfigError('Limit rate integer cannot be less than 1')
 
     if 'ipsec' in rule_conf:
-        if {'match_ipsec', 'match_non_ipsec'} <= set(rule_conf['ipsec']):
-            raise ConfigError('Cannot specify both "match-ipsec" and "match-non-ipsec"')
+        if {'match_ipsec_in', 'match_none_in'} <= set(rule_conf['ipsec']):
+            raise ConfigError('Cannot specify both "match-ipsec" and "match-none"')
+        if {'match_ipsec_out', 'match_none_out'} <= set(rule_conf['ipsec']):
+            raise ConfigError('Cannot specify both "match-ipsec" and "match-none"')
 
     if 'recent' in rule_conf:
         if not {'count', 'time'} <= set(rule_conf['recent']):
@@ -350,7 +380,7 @@ def verify(firewall):
                     verify_nested_group(group_name, group, groups, [])
 
     if 'ipv4' in firewall:
-        for name in ['name','forward','input','output']:
+        for name in ['name','forward','input','output', 'prerouting']:
             if name in firewall['ipv4']:
                 for name_id, name_conf in firewall['ipv4'][name].items():
                     if 'jump' in name_conf['default_action'] and 'default_jump_target' not in name_conf:
@@ -361,16 +391,14 @@ def verify(firewall):
                             raise ConfigError('default-jump-target defined, but default-action jump needed and it is not defined')
                         if name_conf['default_jump_target'] == name_id:
                             raise ConfigError(f'Loop detected on default-jump-target.')
-                        ## Now need to check that default-jump-target exists (other firewall chain/name)
-                        if target not in dict_search_args(firewall['ipv4'], 'name'):
-                            raise ConfigError(f'Invalid jump-target. Firewall name {target} does not exist on the system')
+                        verify_jump_target(firewall, name, target, False, recursive=True)
 
                     if 'rule' in name_conf:
                         for rule_id, rule_conf in name_conf['rule'].items():
-                            verify_rule(firewall, rule_conf, False)
+                            verify_rule(firewall, name, rule_conf, False)
 
     if 'ipv6' in firewall:
-        for name in ['name','forward','input','output']:
+        for name in ['name','forward','input','output', 'prerouting']:
             if name in firewall['ipv6']:
                 for name_id, name_conf in firewall['ipv6'][name].items():
                     if 'jump' in name_conf['default_action'] and 'default_jump_target' not in name_conf:
@@ -381,13 +409,11 @@ def verify(firewall):
                             raise ConfigError('default-jump-target defined, but default-action jump needed and it is not defined')
                         if name_conf['default_jump_target'] == name_id:
                             raise ConfigError(f'Loop detected on default-jump-target.')
-                        ## Now need to check that default-jump-target exists (other firewall chain/name)
-                        if target not in dict_search_args(firewall['ipv6'], 'name'):
-                            raise ConfigError(f'Invalid jump-target. Firewall name {target} does not exist on the system')
+                        verify_jump_target(firewall, name, target, True, recursive=True)
 
                     if 'rule' in name_conf:
                         for rule_id, rule_conf in name_conf['rule'].items():
-                            verify_rule(firewall, rule_conf, True)
+                            verify_rule(firewall, name, rule_conf, True)
 
     #### ZONESSSS
     local_zone = False
@@ -466,33 +492,16 @@ def generate(firewall):
                     local_zone_conf['from_local'][zone] = zone_conf['from'][local_zone]
 
     render(nftables_conf, 'firewall/nftables.j2', firewall)
+    render(sysctl_file, 'firewall/sysctl-firewall.conf.j2', firewall)
     return None
-
-def apply_sysfs(firewall):
-    for name, conf in sysfs_config.items():
-        paths = glob(conf['sysfs'])
-        value = None
-
-        if name in firewall['global_options']:
-            conf_value = firewall['global_options'][name]
-            if conf_value in conf:
-                value = conf[conf_value]
-            elif conf_value == 'enable':
-                value = '1'
-            elif conf_value == 'disable':
-                value = '0'
-
-        if value:
-            for path in paths:
-                with open(path, 'w') as f:
-                    f.write(value)
 
 def apply(firewall):
     install_result, output = rc_cmd(f'nft --file {nftables_conf}')
     if install_result == 1:
         raise ConfigError(f'Failed to apply firewall: {output}')
 
-    apply_sysfs(firewall)
+    # Apply firewall global-options sysctl settings
+    cmd(f'sysctl -f {sysctl_file}')
 
     call_dependents()
 

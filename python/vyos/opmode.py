@@ -31,7 +31,15 @@ class Error(Exception):
 
 class UnconfiguredSubsystem(Error):
     """ Requested operation is valid, but cannot be completed
-        because corresponding subsystem is not configured and running.
+        because corresponding subsystem is not configured
+        and thus is not running.
+    """
+    pass
+
+class UnconfiguredObject(UnconfiguredSubsystem):
+    """ Requested operation is valid but cannot be completed
+        because its parameter refers to an object that does not exist
+        in the system configuration.
     """
     pass
 
@@ -81,7 +89,7 @@ class InternalError(Error):
 
 
 def _is_op_mode_function_name(name):
-    if re.match(r"^(show|clear|reset|restart|add|update|delete|generate|set|renew)", name):
+    if re.match(r"^(show|clear|reset|restart|add|update|delete|generate|set|renew|release)", name):
         return True
     else:
         return False

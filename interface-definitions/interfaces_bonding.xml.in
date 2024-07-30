@@ -102,12 +102,7 @@
                   </constraint>
                 </properties>
               </leafNode>
-              <leafNode name="uplink">
-                <properties>
-                  <help>Uplink to the VXLAN core</help>
-                  <valueless/>
-                </properties>
-              </leafNode>
+              #include <include/interface/evpn-mh-uplink.xml.i>
             </children>
           </node>
           <leafNode name="hash-policy">
@@ -175,6 +170,18 @@
               </constraint>
             </properties>
             <defaultValue>0</defaultValue>
+          </leafNode>
+          <leafNode name="system-mac">
+            <properties>
+              <help>System MAC address for 802.3ad</help>
+              <valueHelp>
+                <format>macaddr</format>
+                <description>MAC address</description>
+              </valueHelp>
+              <constraint>
+                <validator name="mac-address"/>
+              </constraint>
+            </properties>
           </leafNode>
           <leafNode name="lacp-rate">
             <properties>

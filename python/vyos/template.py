@@ -25,6 +25,14 @@ from vyos.utils.file import makedir
 from vyos.utils.permission import chmod
 from vyos.utils.permission import chown
 
+# We use a mutable global variable for the default template directory
+# to make it possible to call scripts from this repository
+# outside of live VyOS systems.
+# If something (like the image build scripts)
+# want to call a script, they can modify the default location
+# to the repository path.
+DEFAULT_TEMPLATE_DIR = directories["templates"]
+
 # Holds template filters registered via register_filter()
 _FILTERS = {}
 _TESTS = {}
@@ -35,18 +43,7 @@ def _get_environment(location=None):
     from os import getenv
 
     if location is None:
-        # Sometimes functions that rely on templates need to be executed outside of VyOS installations:
-        # for example, installer functions are executed for image builds,
-        # and anything may be invoked for testing from a developer's machine.
-        # This environment variable allows running any unmodified code
-        # with a custom template location.
-        location_env_var = getenv("VYOS_TEMPLATE_DIR")
-        if location_env_var:
-            print(f"Using environment variable {location_env_var}")
-            template_dir = location_env_var
-        else:
-            template_dir = directories["templates"]
-        loc_loader=FileSystemLoader(template_dir)
+        loc_loader=FileSystemLoader(DEFAULT_TEMPLATE_DIR)
     else:
         loc_loader=FileSystemLoader(location)
     env = Environment(
@@ -528,10 +525,17 @@ def get_esp_ike_cipher(group_config, ike_group=None):
     return ciphers
 
 @register_filter('get_uuid')
-def get_uuid(interface):
+def get_uuid(seed):
     """ Get interface IP addresses"""
-    from uuid import uuid1
-    return uuid1()
+    if seed:
+        from hashlib import md5
+        from uuid import UUID
+        tmp = md5()
+        tmp.update(seed.encode('utf-8'))
+        return str(UUID(tmp.hexdigest()))
+    else:
+        from uuid import uuid1
+        return uuid1()
 
 openvpn_translate = {
     'des': 'des-cbc',
@@ -552,8 +556,8 @@ def get_openvpn_cipher(cipher):
         return openvpn_translate[cipher].upper()
     return cipher.upper()
 
-@register_filter('openvpn_ncp_ciphers')
-def get_openvpn_ncp_ciphers(ciphers):
+@register_filter('openvpn_data_ciphers')
+def get_openvpn_data_ciphers(ciphers):
     out = []
     for cipher in ciphers:
         if cipher in openvpn_translate:
